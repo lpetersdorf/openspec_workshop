@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueforte Notes</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="brand-name">Blueforte Notes</span>
+      <span class="brand-sub">Diktieren, als Notiz ablegen, an Claude übergeben</span>
+    </div>
+    <span class="engine" id="engine">Spracherkennung des Browsers</span>
+  </header>
+
+  <main class="wrap">
+    <p class="notice" id="privacy">
+      Die Spracherkennung des Browsers sendet das Audio an den Hersteller (bei Chrome: Google).
+      Bitte keine vertraulichen Inhalte diktieren.
+    </p>
+    <p class="notice warn" id="problem" hidden></p>
+
+    <section class="recorder">
+      <button type="button" class="rec" id="recBtn" aria-pressed="false">
+        <span class="dot" aria-hidden="true"></span><span id="recLabel">Aufnahme</span>
+      </button>
+      <div class="status">
+        <span id="statusText">Bereit</span>
+        <span class="timer" id="timer">0:00</span>
+      </div>
+    </section>
+
+    <label class="label" for="text">Text</label>
+    <textarea id="text" rows="10" placeholder="Auf „Aufnahme“ klicken und lossprechen …"></textarea>
+    <div class="interim" id="interim" aria-live="polite"></div>
+
+    <div class="actions">
+      <button type="button" id="copyBtn" disabled>Kopieren</button>
+      <button type="button" id="noteBtn" disabled>Notiz speichern</button>
+      <button type="button" id="claudeBtn" disabled>An Claude übergeben</button>
+      <button type="button" class="ghost" id="clearBtn">Leeren</button>
+      <span class="toast" id="toast" role="status"></span>
+    </div>
+
+    <details class="glossary" id="glossary">
+      <summary>Glossar <span class="count" id="glossaryCount"></span></summary>
+      <p class="hint">Begriffe, die die Erkennung falsch schreibt, werden in neu erkanntem Text automatisch ersetzt.</p>
+      <ul id="glossaryList"></ul>
+      <form id="glossaryForm" class="glossary-form">
+        <input id="gFrom" placeholder="erkannt, z. B. cloud code" autocomplete="off" required>
+        <span aria-hidden="true">→</span>
+        <input id="gTo" placeholder="richtig, z. B. Claude Code" autocomplete="off" required>
+        <button type="submit">Hinzufügen</button>
+      </form>
+    </details>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
