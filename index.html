@@ -12,14 +12,18 @@
       <span class="brand-name">Blueforte Notes</span>
       <span class="brand-sub">Diktieren, als Notiz ablegen, an Claude übergeben</span>
     </div>
-    <span class="engine" id="engine">Spracherkennung des Browsers</span>
+    <span class="engine" id="engine">Lokal · Whisper</span>
   </header>
 
   <main class="wrap">
     <p class="notice" id="privacy">
-      Die Spracherkennung des Browsers sendet das Audio an den Hersteller (bei Chrome: Google).
-      Bitte keine vertraulichen Inhalte diktieren.
+      Das Audio bleibt auf diesem Gerät. Die Spracherkennung (Whisper) läuft lokal im Browser.
+      Beim ersten Start wird das Modell einmalig geladen (ca. 80–210 MB).
     </p>
+    <div class="model">
+      <span id="modelStatus">Modell wird vorbereitet …</span>
+      <div class="bar" aria-hidden="true"><div id="modelBar"></div></div>
+    </div>
     <p class="notice warn" id="problem" hidden></p>
 
     <section class="recorder">
@@ -31,6 +35,13 @@
         <span class="timer" id="timer">0:00</span>
       </div>
     </section>
+
+    <div class="options">
+      <label class="switch"><input type="checkbox" id="translate"> Ins Englische übersetzen</label>
+      <label class="upload">Audiodatei transkribieren
+        <input type="file" id="fileInput" accept="audio/*,video/*">
+      </label>
+    </div>
 
     <label class="label" for="text">Text</label>
     <textarea id="text" rows="10" placeholder="Auf „Aufnahme“ klicken und lossprechen …"></textarea>

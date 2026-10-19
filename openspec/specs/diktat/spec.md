@@ -6,31 +6,40 @@ Diktieren im Browser: gesprochene Sprache wird zu Text, Fachbegriffe werden korr
 ## Requirements
 
 ### Requirement: Transkription
-Das System SHALL gesprochene Sprache mit der Spracherkennung des Browsers in Text umwandeln und dafür keinen eigenen Server und keinen API-Key verwenden.
+Das System SHALL gesprochene Sprache ausschließlich lokal auf dem Gerät in Text umwandeln. Audio darf das Gerät zu keinem Zeitpunkt verlassen.
 
 #### Scenario: Kein eigener Server
 - **WHEN** die Person diktiert
-- **THEN** sendet die App selbst keine Audiodaten an einen eigenen Server oder eine KI-API
+- **THEN** sendet die App keine Audiodaten an einen Server, einen Browser-Dienst oder eine KI-API
+
+#### Scenario: Offline diktieren
+- **GIVEN** das Modell ist geladen
+- **WHEN** keine Internetverbindung besteht
+- **THEN** wird die Aufnahme trotzdem transkribiert
+
+#### Scenario: Stille
+- **WHEN** eine Aufnahme oder ein Abschnitt nur Stille enthält
+- **THEN** wird kein Text eingefügt, auch kein vom Modell erfundener Text wie „Untertitel im Auftrag des ZDF“
 
 #### Scenario: Datenschutz-Hinweis
 - **WHEN** die App geöffnet wird
-- **THEN** weist sie darauf hin, dass die Spracherkennung des Browsers Audio an den Hersteller sendet und keine vertraulichen Inhalte diktiert werden sollen
+- **THEN** weist sie darauf hin, dass das Audio auf dem Gerät bleibt und das Modell beim ersten Start einmalig geladen wird
 
 ### Requirement: Aufnahme mit Live-Text
-Das System SHALL nach einem Klick auf „Aufnahme“ gesprochene Sprache (Deutsch) fortlaufend als Text im Textfeld anzeigen.
+Das System SHALL nach einem Klick auf „Aufnahme“ gesprochene Sprache (Deutsch) abschnittsweise als Text im Textfeld anzeigen, während die Aufnahme weiterläuft.
 
 #### Scenario: Aufnahme starten
-- **WHEN** die Person auf „Aufnahme“ klickt und „Guten Morgen zusammen“ sagt
-- **THEN** erscheint „Guten Morgen zusammen“ im Textfeld
+- **WHEN** die Person auf „Aufnahme“ klickt, „Guten Morgen zusammen“ sagt und kurz pausiert
+- **THEN** erscheint „Guten Morgen zusammen“ im Textfeld, während die Aufnahme weiterläuft
 - **AND** die App zeigt sichtbar an, dass sie zuhört
 
 #### Scenario: Vorläufiger Text
-- **WHEN** die Erkennung einen Satz noch nicht abgeschlossen hat
-- **THEN** wird der vorläufige Text optisch vom fertigen Text unterschieden
+- **WHEN** ein Abschnitt noch transkribiert wird
+- **THEN** zeigt die App an, dass sie Text verarbeitet
 
 #### Scenario: Aufnahme beenden
 - **WHEN** die Person auf „Stopp“ klickt
-- **THEN** endet die Aufnahme und der bisher erkannte Text bleibt erhalten
+- **THEN** endet die Aufnahme, der letzte Abschnitt wird noch transkribiert und der bisher erkannte Text bleibt erhalten
 
 ### Requirement: Durchgehende Aufnahme
 Das System SHALL die Aufnahme fortsetzen, bis die Person auf „Stopp“ klickt, auch wenn die Person zwischendurch nicht spricht.
@@ -96,14 +105,61 @@ Das System SHALL auf Knopfdruck einen Prompt mit dem Transkript in die Zwischena
 - **AND** die App bestätigt das mit „Kopiert“
 
 ### Requirement: Hinweise bei Problemen
-Das System MUST verständlich erklären, wenn das Diktieren nicht möglich ist, und eine Lösung nennen.
+Das System MUST verständlich erklären, wenn das Diktieren nicht oder nur eingeschränkt möglich ist, und eine Lösung nennen.
 
 #### Scenario: Browser ohne Spracherkennung
-- **WHEN** die App in einem Browser ohne Spracherkennung geöffnet wird (z. B. Firefox)
+- **WHEN** der Browser keinen Mikrofon-Zugriff oder kein WebAssembly bietet
 - **THEN** ist „Aufnahme“ deaktiviert
-- **AND** ein Hinweis empfiehlt Chrome, Edge oder Safari
+- **AND** ein Hinweis empfiehlt eine aktuelle Version von Chrome, Edge, Safari oder Firefox
+
+#### Scenario: Ohne Grafikbeschleunigung
+- **WHEN** der Browser keine Grafikbeschleunigung (WebGPU) für das Modell bietet
+- **THEN** transkribiert die App trotzdem, langsamer auf dem Prozessor
+- **AND** ein Hinweis erklärt, dass die Verarbeitung länger dauert
 
 #### Scenario: Mikrofon verweigert
 - **WHEN** die Person den Zugriff auf das Mikrofon ablehnt
 - **THEN** endet die Aufnahme
 - **AND** ein Hinweis erklärt, wie man den Zugriff in den Browser-Einstellungen erlaubt
+
+#### Scenario: Modell kann nicht geladen werden
+- **WHEN** das Modell beim ersten Start nicht heruntergeladen werden kann (z. B. ohne Internet)
+- **THEN** erklärt ein Hinweis, dass für den ersten Start einmalig eine Internetverbindung nötig ist
+
+### Requirement: Modell laden
+Das System SHALL das Spracherkennungsmodell beim ersten Start herunterladen, den Fortschritt anzeigen und es für spätere Starts auf dem Gerät speichern.
+
+#### Scenario: Erster Start
+- **WHEN** die App zum ersten Mal geöffnet wird
+- **THEN** zeigt sie den Download-Fortschritt des Modells in Prozent
+
+#### Scenario: Erneuter Start
+- **WHEN** die App erneut geöffnet wird und das Modell bereits gespeichert ist
+- **THEN** ist sie ohne erneuten Download einsatzbereit
+
+#### Scenario: Aufnahme während des Ladens
+- **WHEN** die Person auf „Aufnahme“ klickt, bevor das Modell geladen ist
+- **THEN** wird die Aufnahme angenommen und transkribiert, sobald das Modell bereit ist
+
+### Requirement: Audiodatei hochladen
+Das System SHALL hochgeladene Audiodateien lokal transkribieren und den Text an das Textfeld anhängen.
+
+#### Scenario: Sprachmemo hochladen
+- **WHEN** die Person eine Audiodatei (z. B. m4a, mp3, wav, webm) auswählt
+- **THEN** wird ihr Inhalt transkribiert und an den bestehenden Text angehängt
+- **AND** das Glossar wird auf den Text angewendet
+
+#### Scenario: Ungeeignete Datei
+- **WHEN** die Datei kein lesbares Audio enthält
+- **THEN** erklärt ein Hinweis, dass die Datei nicht gelesen werden konnte
+
+### Requirement: Übersetzung nach Englisch
+Das System SHALL auf Wunsch gesprochenes Deutsch direkt als englischen Text ausgeben.
+
+#### Scenario: Übersetzen einschalten
+- **WHEN** die Person „Ins Englische übersetzen“ einschaltet und „Guten Morgen zusammen“ sagt
+- **THEN** erscheint ein englischer Text wie „Good morning everyone“
+
+#### Scenario: Übersetzen ausgeschaltet
+- **WHEN** der Schalter aus ist
+- **THEN** erscheint der Text auf Deutsch

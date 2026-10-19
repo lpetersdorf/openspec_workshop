@@ -4,9 +4,10 @@ schema: spec-driven
 context: |
   Blueforte Notes: Diktier-App als Single-Page-App ohne Build-Schritt
   Dateien: index.html, style.css, app.js
-  Spracherkennung: Web Speech API des Browsers, Sprache de-DE
-  Kein Backend, kein API-Key, keine externen Bibliotheken
-  Unterstützte Browser: Chrome, Edge, Safari. Firefox zeigt einen Hinweis.
+  Dateien zusätzlich: whisper-worker.js (Modell im Web Worker)
+  Spracherkennung: Whisper lokal im Browser (transformers.js per CDN, Modell Xenova/whisper-base), Sprache Deutsch
+  Audio verlässt nie das Gerät. Kein Backend, kein API-Key
+  Unterstützte Browser: Chrome, Edge, Safari, Firefox
   Start lokal über "npx serve ." (Mikrofon braucht localhost oder https)
   Notizen im Obsidian-Format: Markdown mit YAML-Frontmatter
   Artefakte auf Deutsch schreiben, Requirements mit SHALL oder MUST

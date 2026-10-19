@@ -1,4 +1,4 @@
-/* Blueforte Notes – Version 1: Diktieren mit der Spracherkennung des Browsers */
+/* Blueforte Notes – Version 2: lokale Transkription mit Whisper. Audio verlässt das Gerät nicht. */
 (() => {
   'use strict';
 
@@ -64,8 +64,88 @@
     return /\s$/.test(existing) ? existing + add : `${existing} ${add}`;
   }
 
+  /** Lautstärke eines Puffers (Effektivwert). */
+  function rms(buf) {
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+    return buf.length ? Math.sqrt(sum / buf.length) : 0;
+  }
+
+  /** Rechnet Audio auf die Zielrate herunter (Mittelwert je Fenster). */
+  function downsample(buf, fromRate, toRate = 16000) {
+    if (fromRate === toRate) return Float32Array.from(buf);
+    const ratio = fromRate / toRate;
+    const out = new Float32Array(Math.floor(buf.length / ratio));
+    for (let i = 0; i < out.length; i++) {
+      const start = Math.floor(i * ratio), end = Math.min(buf.length, Math.floor((i + 1) * ratio));
+      let sum = 0;
+      for (let j = start; j < end; j++) sum += buf[j];
+      out[i] = end > start ? sum / (end - start) : 0;
+    }
+    return out;
+  }
+
+  function concat(chunks) {
+    const len = chunks.reduce((n, c) => n + c.length, 0);
+    const out = new Float32Array(len);
+    let o = 0;
+    for (const c of chunks) { out.set(c, o); o += c.length; }
+    return out;
+  }
+
+  /**
+   * Zerlegt einen Audiostrom in Abschnitte: nach Sprache und kurzer Stille, spätestens nach maxSec.
+   * Abschnitte ohne Sprache werden verworfen (kein Text bei Stille).
+   */
+  class Segmenter {
+    constructor({ sampleRate, threshold = 0.012, minSilenceSec = 0.8, maxSec = 20, minSpeechSec = 0.3, prerollSec = 0.3 }) {
+      Object.assign(this, { sampleRate, threshold });
+      this.minSilence = minSilenceSec * sampleRate;
+      this.max = maxSec * sampleRate;
+      this.minSpeech = minSpeechSec * sampleRate;
+      this.preroll = prerollSec * sampleRate;
+      this.reset();
+    }
+    reset() { this.chunks = []; this.total = 0; this.speech = 0; this.silence = 0; }
+    push(buf) {
+      const loud = rms(buf) >= this.threshold;
+      this.chunks.push(buf); this.total += buf.length;
+      if (loud) { this.speech += buf.length; this.silence = 0; } else { this.silence += buf.length; }
+      if (this.speech === 0) {
+        // Noch keine Sprache: nur einen kurzen Vorlauf behalten
+        while (this.chunks.length > 1 && this.total - this.chunks[0].length >= this.preroll) this.total -= this.chunks.shift().length;
+        return [];
+      }
+      if (this.speech >= this.minSpeech && (this.silence >= this.minSilence || this.total >= this.max)) {
+        const seg = concat(this.chunks); this.reset(); return [seg];
+      }
+      return [];
+    }
+    flush() {
+      const seg = this.speech >= this.minSpeech ? concat(this.chunks) : null;
+      this.reset();
+      return seg;
+    }
+  }
+
+  /** Bekannte Whisper-Halluzinationen, die bei Stille oder Rauschen entstehen. */
+  const HALLUCINATIONS = [
+    /untertitel(ung)? (im auftrag|des zdf|der amara|von)/i,
+    /vielen dank (fürs|für's|für das|für ihre aufmerksamkeit)/i,
+    /^\s*(danke\.?|tschüss\.?|\.+|…)\s*$/i,
+    /copyright .*(wdr|zdf|ard|swr)/i,
+    /^\s*\[?(musik|music|stille|silence|applaus)\]?\s*$/i
+  ];
+  function isHallucination(text) {
+    const t = text.trim();
+    return !t || HALLUCINATIONS.some(re => re.test(t));
+  }
+
   // Für Tests im Browser verfügbar machen
-  window.BFN = { applyGlossary, formatDuration, noteFilename, buildNote, buildClaudePrompt, appendText, DEFAULT_GLOSSARY };
+  window.BFN = {
+    applyGlossary, formatDuration, noteFilename, buildNote, buildClaudePrompt, appendText,
+    rms, downsample, Segmenter, isHallucination, DEFAULT_GLOSSARY
+  };
 
   // ---------- Glossar-Speicher ----------
 
@@ -87,6 +167,8 @@
   const ui = {
     rec: $('recBtn'), recLabel: $('recLabel'), status: $('statusText'), timer: $('timer'),
     text: $('text'), interim: $('interim'), problem: $('problem'),
+    model: $('modelStatus'), modelBar: $('modelBar'), engine: $('engine'),
+    file: $('fileInput'), translate: $('translate'),
     copy: $('copyBtn'), note: $('noteBtn'), claude: $('claudeBtn'), clear: $('clearBtn'), toast: $('toast'),
     gList: $('glossaryList'), gCount: $('glossaryCount'), gForm: $('glossaryForm'), gFrom: $('gFrom'), gTo: $('gTo')
   };
@@ -164,98 +246,181 @@
     toast('Notiz gespeichert');
   });
   ui.clear.addEventListener('click', () => {
-    ui.text.value = ''; ui.interim.textContent = ''; recordedMs = 0; renderTimer(); updateButtons();
+    ui.text.value = ''; recordedMs = 0; renderTimer(); updateButtons();
   });
   ui.text.addEventListener('input', updateButtons);
 
+  // ---------- Whisper im Worker ----------
+
+  const worker = new Worker('whisper-worker.js', { type: 'module' });
+  const progress = new Map();
+  let modelReady = false;
+  let nextId = 1;
+  let pending = 0;
+
+  function renderStatus() {
+    if (recording) ui.status.textContent = pending ? `Hört zu … · ${pending} in Arbeit` : 'Hört zu …';
+    else ui.status.textContent = pending ? `Transkribiert (${pending}) …` : 'Bereit';
+    ui.interim.textContent = pending ? (modelReady ? 'Text wird verarbeitet …' : 'Wartet auf das Modell …') : '';
+  }
+
+  worker.addEventListener('message', ({ data }) => {
+    switch (data.type) {
+      case 'loading':
+        ui.model.textContent = 'Modell wird geladen …';
+        break;
+      case 'progress': {
+        progress.set(data.file, { loaded: data.loaded || 0, total: data.total || 0 });
+        let loaded = 0, total = 0;
+        progress.forEach(p => { loaded += p.loaded; total += p.total; });
+        const pct = total ? Math.min(100, Math.round(loaded / total * 100)) : 0;
+        ui.model.textContent = `Modell wird geladen: ${pct} %`;
+        ui.modelBar.style.width = `${pct}%`;
+        break;
+      }
+      case 'ready':
+        modelReady = true;
+        ui.modelBar.style.width = '100%';
+        ui.model.textContent = data.device === 'webgpu'
+          ? 'Modell bereit · Grafikkarte'
+          : 'Modell bereit · Prozessor';
+        ui.engine.textContent = 'Lokal · Whisper base';
+        if (data.device !== 'webgpu') {
+          showProblem('Dieser Browser bietet keine Grafikbeschleunigung (WebGPU). Die Transkription läuft auf dem Prozessor und dauert länger.');
+        }
+        renderStatus();
+        break;
+      case 'load-error':
+        ui.model.textContent = 'Modell nicht geladen';
+        showProblem('Das Spracherkennungsmodell konnte nicht geladen werden. Für den ersten Start ist einmalig eine Internetverbindung nötig. Danach funktioniert die App auch offline.');
+        break;
+      case 'result': {
+        pending = Math.max(0, pending - 1);
+        if (!isHallucination(data.text)) {
+          ui.text.value = appendText(ui.text.value, applyGlossary(data.text, glossary));
+          ui.text.scrollTop = ui.text.scrollHeight;
+          updateButtons();
+        }
+        renderStatus();
+        break;
+      }
+      case 'error':
+        pending = Math.max(0, pending - 1);
+        // Ohne Modell steht der Hinweis zum Laden bereits da
+        if (!data.modelMissing) showProblem(`Ein Abschnitt konnte nicht transkribiert werden: ${data.message}`);
+        renderStatus();
+        break;
+    }
+  });
+
+  /** Schickt Audio (beliebige Rate) als 16-kHz-Mono an den Worker. */
+  function transcribe(samples, sampleRate) {
+    const audio = downsample(samples, sampleRate, 16000);
+    pending++;
+    renderStatus();
+    worker.postMessage({ type: 'transcribe', id: nextId++, audio, translate: ui.translate.checked }, [audio.buffer]);
+  }
+
   // ---------- Aufnahme ----------
 
-  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let recognition = null;
-  let wantsRecording = false;
-  let recordedMs = 0;
-  let segmentStart = 0;
-  let tick = null;
+  let recording = false;
+  let stream = null, ctx = null, processor = null, segmenter = null;
+  let recordedMs = 0, segmentStart = 0, tick = null;
 
-  const totalMs = () => recordedMs + (wantsRecording && segmentStart ? Date.now() - segmentStart : 0);
+  const totalMs = () => recordedMs + (recording && segmentStart ? Date.now() - segmentStart : 0);
   const renderTimer = () => { ui.timer.textContent = formatDuration(totalMs()); };
 
   function setRecordingUI(on) {
     ui.rec.setAttribute('aria-pressed', String(on));
     ui.recLabel.textContent = on ? 'Stopp' : 'Aufnahme';
-    ui.status.textContent = on ? 'Hört zu …' : 'Bereit';
+    renderStatus();
   }
 
-  function startRecording() {
+  async function startRecording() {
     showProblem('');
-    wantsRecording = true;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+    } catch (err) {
+      if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {
+        showProblem('Kein Zugriff auf das Mikrofon. Bitte in den Browser-Einstellungen für diese Seite das Mikrofon erlauben (Schloss-Symbol in der Adresszeile) und die App über localhost öffnen.');
+      } else {
+        showProblem('Kein Mikrofon gefunden. Bitte ein Mikrofon anschließen.');
+      }
+      return;
+    }
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    ctx = new AudioCtx();
+    const source = ctx.createMediaStreamSource(stream);
+    // ScriptProcessorNode: veraltet, aber überall verfügbar und für diese Größe ausreichend (siehe design.md)
+    processor = ctx.createScriptProcessor(4096, 1, 1);
+    segmenter = new Segmenter({ sampleRate: ctx.sampleRate });
+    processor.onaudioprocess = e => {
+      if (!recording) return;
+      const buf = Float32Array.from(e.inputBuffer.getChannelData(0));
+      segmenter.push(buf).forEach(seg => transcribe(seg, ctx.sampleRate));
+    };
+    source.connect(processor);
+    processor.connect(ctx.destination);
+
+    recording = true;
     segmentStart = Date.now();
-    setRecordingUI(true);
     clearInterval(tick); tick = setInterval(renderTimer, 500);
-    try { recognition.start(); } catch { /* läuft bereits */ }
+    setRecordingUI(true);
   }
 
   function stopRecording() {
-    if (wantsRecording && segmentStart) recordedMs += Date.now() - segmentStart;
-    wantsRecording = false;
+    if (recording && segmentStart) recordedMs += Date.now() - segmentStart;
+    recording = false;
     segmentStart = 0;
     clearInterval(tick); renderTimer();
+    if (segmenter && ctx) {
+      const rest = segmenter.flush();
+      if (rest) transcribe(rest, ctx.sampleRate);
+    }
+    try { processor && processor.disconnect(); } catch { /* bereits getrennt */ }
+    stream && stream.getTracks().forEach(t => t.stop());
+    ctx && ctx.close();
+    stream = ctx = processor = segmenter = null;
     setRecordingUI(false);
-    ui.interim.textContent = '';
-    try { recognition.stop(); } catch { /* bereits gestoppt */ }
   }
 
-  if (!Recognition) {
+  ui.rec.addEventListener('click', () => (recording ? stopRecording() : startRecording()));
+
+  // ---------- Audiodatei hochladen ----------
+
+  ui.file.addEventListener('change', async () => {
+    const file = ui.file.files && ui.file.files[0];
+    if (!file) return;
+    showProblem('');
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const decoder = new AudioCtx();
+    try {
+      const decoded = await decoder.decodeAudioData(await file.arrayBuffer());
+      const mono = new Float32Array(decoded.length);
+      for (let c = 0; c < decoded.numberOfChannels; c++) {
+        const data = decoded.getChannelData(c);
+        for (let i = 0; i < data.length; i++) mono[i] += data[i] / decoded.numberOfChannels;
+      }
+      if (rms(mono) < 0.002) { toast('Datei enthält nur Stille'); return; }
+      transcribe(mono, decoded.sampleRate);
+      toast(`„${file.name}“ wird transkribiert`);
+    } catch {
+      showProblem(`Die Datei „${file.name}“ konnte nicht gelesen werden. Bitte eine Audiodatei wie m4a, mp3, wav oder webm wählen.`);
+    } finally {
+      decoder.close();
+      ui.file.value = '';
+    }
+  });
+
+  // ---------- Start ----------
+
+  if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) || typeof WebAssembly === 'undefined') {
     ui.rec.disabled = true;
-    showProblem('Dieser Browser unterstützt keine Spracherkennung. Bitte Chrome, Edge oder Safari verwenden.');
-  } else {
-    recognition = new Recognition();
-    recognition.lang = 'de-DE';
-    recognition.continuous = true;
-    recognition.interimResults = true;
-
-    recognition.addEventListener('result', e => {
-      let interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const r = e.results[i];
-        const transcript = r[0].transcript;
-        if (r.isFinal) {
-          ui.text.value = appendText(ui.text.value, applyGlossary(transcript, glossary));
-          ui.text.scrollTop = ui.text.scrollHeight;
-        } else {
-          interim += transcript;
-        }
-      }
-      ui.interim.textContent = applyGlossary(interim, glossary);
-      updateButtons();
-    });
-
-    recognition.addEventListener('error', e => {
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-        stopRecording();
-        showProblem('Kein Zugriff auf das Mikrofon. Bitte in den Browser-Einstellungen für diese Seite das Mikrofon erlauben (Schloss-Symbol in der Adresszeile) und die App über localhost öffnen.');
-      } else if (e.error === 'network') {
-        stopRecording();
-        showProblem('Keine Verbindung zum Erkennungsdienst des Browsers. Bitte Internetverbindung prüfen.');
-      } else if (e.error === 'audio-capture') {
-        stopRecording();
-        showProblem('Kein Mikrofon gefunden. Bitte ein Mikrofon anschließen.');
-      }
-      // "no-speech" und "aborted": kein Problem, die Aufnahme startet bei "end" neu
-    });
-
-    // Die Browser-Erkennung beendet sich nach Stille selbst. Solange nicht "Stopp" geklickt wurde: neu starten.
-    recognition.addEventListener('end', () => {
-      ui.interim.textContent = '';
-      if (wantsRecording) {
-        setTimeout(() => { if (wantsRecording) { try { recognition.start(); } catch { /* läuft bereits */ } } }, 150);
-      }
-    });
+    showProblem('Dieser Browser kann nicht auf das Mikrofon zugreifen. Bitte eine aktuelle Version von Chrome, Edge, Safari oder Firefox verwenden und die App über localhost öffnen.');
   }
-
-  ui.rec.addEventListener('click', () => (wantsRecording ? stopRecording() : startRecording()));
 
   renderGlossary();
   updateButtons();
   renderTimer();
+  renderStatus();
 })();

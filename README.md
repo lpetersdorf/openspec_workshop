@@ -14,7 +14,7 @@ openspec --version
 claude --version        # oder: codex --version
 ```
 
-- Browser: **Chrome, Edge oder Safari** (Firefox unterstützt die Web Speech API nicht)
+- Browser: **Chrome, Edge oder Safari** für Version 1 (Firefox unterstützt die Web Speech API nicht). Version 2 läuft auch in Firefox
 - Ein Mikrofon, idealerweise ein Headset
 
 ## Los geht's
@@ -62,4 +62,5 @@ git switch stage-2-applied
 ## Hinweise
 
 - **Datenschutz:** In Version 1 schickt der Browser das Audio an den Erkennungsdienst des Herstellers (bei Chrome: Google). Bitte keine Kundeninhalte diktieren. Version 2 verarbeitet alles lokal.
-- **Whisper-Modell:** Version 2 lädt beim ersten Start das Modell `Xenova/whisper-base` (ca. 80–150 MB) von Hugging Face. Danach liegt es im Browser-Cache.
+- **Whisper-Modell:** Version 2 lädt beim ersten Start das Modell `Xenova/whisper-base` von Hugging Face (ca. 210 MB mit Grafikkarte, ca. 80 MB ohne). Danach liegt es im Browser-Cache.
+- **Offline-Demo:** Seite öffnen, warten bis „Modell bereit“, dann WLAN aus und diktieren. Die Seite dabei nicht neu laden, denn die Bibliothek transformers.js kommt per CDN.

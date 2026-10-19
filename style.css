@@ -71,6 +71,18 @@ textarea {
 textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .interim { min-height: 1.6em; color: var(--fg3); font-style: italic; margin-top: -8px; }
 
+.model { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--fg2); }
+.model .bar { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.model .bar > div { height: 100%; width: 0; background: var(--grad); transition: width .3s ease; }
+
+.options { display: flex; gap: 20px; flex-wrap: wrap; align-items: center; }
+.switch { display: inline-flex; gap: 8px; align-items: center; cursor: pointer; }
+.switch input { width: 18px; height: 18px; accent-color: var(--accent); }
+.upload { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; border: 1px solid var(--fg2); border-radius: 6px; padding: 8px 14px; font-weight: 500; }
+.upload:hover { background: var(--surface); }
+.upload input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.upload:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 button {
   font: inherit; font-weight: 500; cursor: pointer;
