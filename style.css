@@ -109,3 +109,10 @@ button.ghost { border-color: transparent; color: var(--fg2); }
 /* Hover darf die Schrift des Aufnahme-Buttons nicht unsichtbar machen */
 .rec:hover:not(:disabled) { background: var(--fg); color: var(--bg); opacity: .9; }
 .rec[aria-pressed="true"]:hover:not(:disabled) { background: var(--bg); color: var(--fg); opacity: 1; }
+
+/* Desktop-App: Notizordner */
+.folder { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 14px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 6px; }
+.folder-label { color: var(--fg2); text-transform: uppercase; letter-spacing: .08em; font-size: 12px; }
+.folder-path { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+.folder button { padding: 6px 12px; font-size: 14px; }
+.shortcut { color: var(--fg2); width: 100%; }

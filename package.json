@@ -1,0 +1,60 @@
+{
+  "name": "blueforte-notes",
+  "productName": "Blueforte Notes",
+  "version": "1.0.0",
+  "description": "Diktieren, als Obsidian-Notiz ablegen, an Claude übergeben. Spracherkennung lokal mit Whisper.",
+  "author": "Blueforte",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "desktop/main.js",
+  "scripts": {
+    "postinstall": "node desktop/vendor.js",
+    "desktop": "electron .",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win"
+  },
+  "devDependencies": {
+    "@huggingface/transformers": "3.8.1",
+    "electron": "44.5.1",
+    "electron-builder": "26.17.0"
+  },
+  "build": {
+    "appId": "com.blueforte.notes",
+    "productName": "Blueforte Notes",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "index.html",
+      "style.css",
+      "app.js",
+      "whisper-worker.js",
+      "vendor/**",
+      "desktop/**",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] }
+      ],
+      "category": "public.app-category.productivity",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Blueforte Notes braucht das Mikrofon zum Diktieren. Das Audio bleibt auf diesem Gerät."
+      }
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Blueforte Notes"
+    },
+    "publish": null
+  }
+}

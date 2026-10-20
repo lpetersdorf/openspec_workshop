@@ -1,4 +1,4 @@
-/* Blueforte Notes – Version 2: lokale Transkription mit Whisper. Audio verlässt das Gerät nicht. */
+/* Blueforte Notes – lokale Transkription mit Whisper, im Browser oder als Desktop-App. Audio verlässt das Gerät nicht. */
 (() => {
   'use strict';
 
@@ -170,8 +170,13 @@
     model: $('modelStatus'), modelBar: $('modelBar'), engine: $('engine'),
     file: $('fileInput'), translate: $('translate'),
     copy: $('copyBtn'), note: $('noteBtn'), claude: $('claudeBtn'), clear: $('clearBtn'), toast: $('toast'),
-    gList: $('glossaryList'), gCount: $('glossaryCount'), gForm: $('glossaryForm'), gFrom: $('gFrom'), gTo: $('gTo')
+    gList: $('glossaryList'), gCount: $('glossaryCount'), gForm: $('glossaryForm'), gFrom: $('gFrom'), gTo: $('gTo'),
+    folderRow: $('folderRow'), folderPath: $('folderPath'), folderBtn: $('folderBtn'), shortcutHint: $('shortcutHint')
   };
+
+  // In der Desktop-App stellt preload.js diese Schnittstelle bereit, im Browser fehlt sie
+  const desktop = window.bfnDesktop || null;
+  let folder = null;
 
   let glossary = loadGlossary();
   let toastTimer = null;
@@ -235,15 +240,30 @@
 
   ui.copy.addEventListener('click', () => copyText(ui.text.value.trim()));
   ui.claude.addEventListener('click', () => copyText(buildClaudePrompt(ui.text.value)));
-  ui.note.addEventListener('click', () => {
-    const now = new Date();
-    const blob = new Blob([buildNote(ui.text.value, now, totalMs())], { type: 'text/markdown;charset=utf-8' });
+  function downloadNote(filename, content) {
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = noteFilename(now);
+    a.download = filename;
     document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     toast('Notiz gespeichert');
+  }
+
+  ui.note.addEventListener('click', async () => {
+    const now = new Date();
+    const filename = noteFilename(now);
+    const content = buildNote(ui.text.value, now, totalMs());
+    if (desktop && folder) {
+      const res = await desktop.saveNote(filename, content);
+      if (res.ok) { showProblem(''); toast(`Gespeichert: ${res.name}`); return; }
+      if (res.reason === 'missing') {
+        showProblem(`Der Notizordner „${res.folder}“ wurde nicht gefunden. Bitte über „Ordner wählen“ neu auswählen.`);
+        renderFolder({ path: res.folder, exists: false });
+        return;
+      }
+    }
+    downloadNote(filename, content);
   });
   ui.clear.addEventListener('click', () => {
     ui.text.value = ''; recordedMs = 0; renderTimer(); updateButtons();
@@ -284,7 +304,7 @@
         ui.model.textContent = data.device === 'webgpu'
           ? 'Modell bereit · Grafikkarte'
           : 'Modell bereit · Prozessor';
-        ui.engine.textContent = 'Lokal · Whisper base';
+        ui.engine.textContent = desktop ? 'Desktop · Whisper base' : 'Lokal · Whisper base';
         if (data.device !== 'webgpu') {
           showProblem('Dieser Browser bietet keine Grafikbeschleunigung (WebGPU). Die Transkription läuft auf dem Prozessor und dauert länger.');
         }
@@ -336,13 +356,18 @@
     renderStatus();
   }
 
+  const MIC_HINT = desktop
+    ? 'Kein Zugriff auf das Mikrofon. Bitte in den Systemeinstellungen unter Datenschutz › Mikrofon „Blueforte Notes“ erlauben und die App neu starten.'
+    : 'Kein Zugriff auf das Mikrofon. Bitte in den Browser-Einstellungen für diese Seite das Mikrofon erlauben (Schloss-Symbol in der Adresszeile) und die App über localhost öffnen.';
+
   async function startRecording() {
     showProblem('');
+    if (desktop && !(await desktop.ensureMic())) { showProblem(MIC_HINT); return; }
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
     } catch (err) {
       if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {
-        showProblem('Kein Zugriff auf das Mikrofon. Bitte in den Browser-Einstellungen für diese Seite das Mikrofon erlauben (Schloss-Symbol in der Adresszeile) und die App über localhost öffnen.');
+        showProblem(MIC_HINT);
       } else {
         showProblem('Kein Mikrofon gefunden. Bitte ein Mikrofon anschließen.');
       }
@@ -411,6 +436,32 @@
       ui.file.value = '';
     }
   });
+
+  // ---------- Desktop-App ----------
+
+  function renderFolder(f) {
+    folder = f && f.exists ? f.path : null;
+    ui.folderPath.textContent = f ? f.path + (f.exists ? '' : ' (nicht gefunden)') : 'nicht gewählt, Notizen werden heruntergeladen';
+  }
+
+  if (desktop) {
+    ui.folderRow.hidden = false;
+    desktop.getFolder().then(f => {
+      renderFolder(f);
+      if (f && !f.exists) showProblem(`Der Notizordner „${f.path}“ wurde nicht gefunden. Bitte über „Ordner wählen“ neu auswählen.`);
+    });
+    ui.folderBtn.addEventListener('click', async () => {
+      const f = await desktop.chooseFolder();
+      if (f) { renderFolder(f); showProblem(''); toast('Notizordner gespeichert'); }
+    });
+    desktop.info().then(info => {
+      ui.engine.textContent = 'Desktop · Whisper';
+      ui.shortcutHint.textContent = info.shortcut
+        ? `Tastenkürzel ${info.shortcut} startet und stoppt die Aufnahme, auch im Hintergrund.`
+        : `Das Tastenkürzel ${info.shortcutLabel} ist bereits von einem anderen Programm belegt und steht nicht zur Verfügung.`;
+    });
+    desktop.onToggleRecording(() => (recording ? stopRecording() : startRecording()));
+  }
 
   // ---------- Start ----------
 

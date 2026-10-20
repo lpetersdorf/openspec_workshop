@@ -43,11 +43,43 @@ Wer im Workshop hängen bleibt, springt auf den nächsten Stand:
 | `stage-2-applied` | Version 1 implementiert, alle Tasks abgehakt |
 | `stage-3-archived` | Change archiviert, `openspec/specs/` beschreibt die App |
 | `stage-4-whisper` | Change `lokale-transkription` umgesetzt und archiviert |
+| `stage-5-desktop` | Bonus: Change `desktop-app`, Blueforte Notes als Desktop-App für macOS und Windows |
 
 ```bash
 git fetch origin
 git switch stage-2-applied
 ```
+
+## Desktop-App (Stage 5, Bonus)
+
+Blueforte Notes als echte App für macOS und Windows (Electron). Neu gegenüber der Web-App:
+
+- **Notizordner:** einmal wählen (z. B. den Obsidian-Vault), Notizen landen dort direkt. Vorhandene Dateien werden nie überschrieben.
+- **Tastenkürzel:** `Cmd+Shift+D` (macOS) bzw. `Strg+Umschalt+D` (Windows) startet und stoppt die Aufnahme, auch im Hintergrund.
+- **Offline:** Nach dem ersten Modell-Download startet und transkribiert die App ohne Internet.
+
+### Selbst bauen
+
+```bash
+git switch stage-5-desktop
+npm install          # lädt Electron und kopiert transformers.js nach vendor/
+npm run desktop      # App direkt starten, ohne Installation
+npm run dist:mac     # .dmg bauen (auf einem Mac), liegt danach in dist/
+npm run dist:win     # Installer bauen (auf Windows), liegt danach in dist/
+```
+
+### Fertige Pakete
+
+Bei jedem Push auf `stage-5-desktop` baut GitHub Actions beide Pakete: **Actions → „Desktop-App bauen“ → Lauf öffnen → Artifacts**.
+
+### Unsignierte App öffnen
+
+Die App ist nicht mit einem Apple- oder Microsoft-Zertifikat signiert.
+
+- **macOS:** Beim ersten Öffnen einer heruntergeladenen App erscheint eine Warnung. Dann unter **Systemeinstellungen → Datenschutz & Sicherheit → „Dennoch öffnen“** freigeben, oder im Terminal:
+  `xattr -dr com.apple.quarantine "/Applications/Blueforte Notes.app"`
+  Selbst gebaute Apps (`npm run dist:mac`) öffnen ohne Warnung.
+- **Windows:** SmartScreen meldet „Der Computer wurde durch Windows geschützt“: **Weitere Informationen → Trotzdem ausführen**.
 
 ## Der Kreislauf
 

@@ -17,7 +17,7 @@
 
   <main class="wrap">
     <p class="notice" id="privacy">
-      Das Audio bleibt auf diesem Gerät. Die Spracherkennung (Whisper) läuft lokal im Browser.
+      Das Audio bleibt auf diesem Gerät. Die Spracherkennung (Whisper) läuft lokal auf diesem Gerät.
       Beim ersten Start wird das Modell einmalig geladen (ca. 80–210 MB).
     </p>
     <div class="model">
@@ -25,6 +25,12 @@
       <div class="bar" aria-hidden="true"><div id="modelBar"></div></div>
     </div>
     <p class="notice warn" id="problem" hidden></p>
+    <div class="folder" id="folderRow" hidden>
+      <span class="folder-label">Notizordner</span>
+      <span class="folder-path" id="folderPath">nicht gewählt</span>
+      <button type="button" id="folderBtn">Ordner wählen</button>
+      <span class="shortcut" id="shortcutHint"></span>
+    </div>
 
     <section class="recorder">
       <button type="button" class="rec" id="recBtn" aria-pressed="false">

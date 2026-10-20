@@ -9,6 +9,7 @@ context: |
   Audio verlässt nie das Gerät. Kein Backend, kein API-Key
   Unterstützte Browser: Chrome, Edge, Safari, Firefox
   Start lokal über "npx serve ." (Mikrofon braucht localhost oder https)
+  Desktop-App: Electron (desktop/), lädt dieselben Dateien wie die Web-App, Pakete per electron-builder
   Notizen im Obsidian-Format: Markdown mit YAML-Frontmatter
   Artefakte auf Deutsch schreiben, Requirements mit SHALL oder MUST
 
