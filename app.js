@@ -57,6 +57,9 @@
   const CLAUDE_PROMPT = 'Mach aus diesem Diktat eine kurze Notiz mit Zusammenfassung und Action Items:';
   const buildClaudePrompt = text => `${CLAUDE_PROMPT}\n\n${text.trim()}`;
 
+  /** Zählt Wörter (für „Fertig · 12 neue Wörter“ im Aufnahme-Fenster). */
+  const countWords = text => (text.trim() ? text.trim().split(/\s+/).length : 0);
+
   function appendText(existing, addition) {
     const add = addition.trim();
     if (!add) return existing;
@@ -143,7 +146,7 @@
 
   // Für Tests im Browser verfügbar machen
   window.BFN = {
-    applyGlossary, formatDuration, noteFilename, buildNote, buildClaudePrompt, appendText,
+    applyGlossary, formatDuration, noteFilename, buildNote, buildClaudePrompt, appendText, countWords,
     rms, downsample, Segmenter, isHallucination, DEFAULT_GLOSSARY
   };
 
@@ -177,6 +180,21 @@
   // In der Desktop-App stellt preload.js diese Schnittstelle bereit, im Browser fehlt sie
   const desktop = window.bfnDesktop || null;
   let folder = null;
+  let savedText = '';          // zuletzt gespeicherter Stand, für „ungespeicherter Text“
+  let sessionStartWords = 0;   // Wörter vor der laufenden Aufnahme
+
+  /** Meldet den Zustand an die Desktop-App (Menüleiste, Aufnahme-Fenster, Nachfrage beim Beenden). */
+  function pushState() {
+    if (!desktop) return;
+    const text = ui.text.value.trim();
+    desktop.sendState({
+      recording,
+      pending,
+      dirty: !!text && text !== savedText,
+      elapsedMs: totalMs(),
+      words: Math.max(0, countWords(ui.text.value) - sessionStartWords)
+    });
+  }
 
   let glossary = loadGlossary();
   let toastTimer = null;
@@ -197,6 +215,7 @@
     ui.copy.disabled = empty;
     ui.note.disabled = empty;
     ui.claude.disabled = empty;
+    pushState();
   }
 
   function renderGlossary() {
@@ -250,24 +269,45 @@
     toast('Notiz gespeichert');
   }
 
-  ui.note.addEventListener('click', async () => {
+  function markSaved() { savedText = ui.text.value.trim(); pushState(); }
+
+  function clearText() {
+    ui.text.value = ''; recordedMs = 0; sessionStartWords = 0; renderTimer(); updateButtons();
+  }
+
+  /**
+   * Speichert die Notiz: in der Desktop-App in den Notizordner, sonst als Download.
+   * Aus dem Aufnahme-Fenster (fromOverlay) gibt es keinen Download; ohne Ordner zeigt das Hauptfenster einen Hinweis.
+   */
+  async function saveNote({ fromOverlay = false } = {}) {
+    if (!ui.text.value.trim()) return { ok: false, reason: 'empty' };
     const now = new Date();
     const filename = noteFilename(now);
     const content = buildNote(ui.text.value, now, totalMs());
     if (desktop && folder) {
       const res = await desktop.saveNote(filename, content);
-      if (res.ok) { showProblem(''); toast(`Gespeichert: ${res.name}`); return; }
+      if (res.ok) {
+        showProblem(''); toast(`Gespeichert: ${res.name}`);
+        if (fromOverlay) clearText(); else markSaved();
+        return res;
+      }
       if (res.reason === 'missing') {
         showProblem(`Der Notizordner „${res.folder}“ wurde nicht gefunden. Bitte über „Ordner wählen“ neu auswählen.`);
         renderFolder({ path: res.folder, exists: false });
-        return;
+        return res;
       }
     }
+    if (fromOverlay) {
+      showProblem('Zum Speichern aus dem Aufnahme-Fenster bitte zuerst über „Ordner wählen“ einen Notizordner festlegen. Der Text ist noch da.');
+      return { ok: false, reason: 'no-folder' };
+    }
     downloadNote(filename, content);
-  });
-  ui.clear.addEventListener('click', () => {
-    ui.text.value = ''; recordedMs = 0; renderTimer(); updateButtons();
-  });
+    markSaved();
+    return { ok: true, name: filename };
+  }
+
+  ui.note.addEventListener('click', () => saveNote());
+  ui.clear.addEventListener('click', clearText);
   ui.text.addEventListener('input', updateButtons);
 
   // ---------- Whisper im Worker ----------
@@ -282,6 +322,7 @@
     if (recording) ui.status.textContent = pending ? `Hört zu … · ${pending} in Arbeit` : 'Hört zu …';
     else ui.status.textContent = pending ? `Transkribiert (${pending}) …` : 'Bereit';
     ui.interim.textContent = pending ? (modelReady ? 'Text wird verarbeitet …' : 'Wartet auf das Modell …') : '';
+    pushState();
   }
 
   worker.addEventListener('message', ({ data }) => {
@@ -382,6 +423,7 @@
     processor.onaudioprocess = e => {
       if (!recording) return;
       const buf = Float32Array.from(e.inputBuffer.getChannelData(0));
+      if (desktop) desktop.sendLevel(rms(buf));
       segmenter.push(buf).forEach(seg => transcribe(seg, ctx.sampleRate));
     };
     source.connect(processor);
@@ -389,6 +431,7 @@
 
     recording = true;
     segmentStart = Date.now();
+    sessionStartWords = countWords(ui.text.value);
     clearInterval(tick); tick = setInterval(renderTimer, 500);
     setRecordingUI(true);
   }
@@ -457,10 +500,11 @@
     desktop.info().then(info => {
       ui.engine.textContent = 'Desktop · Whisper';
       ui.shortcutHint.textContent = info.shortcut
-        ? `Tastenkürzel ${info.shortcut} startet und stoppt die Aufnahme, auch im Hintergrund.`
+        ? `Tastenkürzel ${info.shortcut} startet und stoppt die Aufnahme, auch bei geschlossenem Fenster.`
         : `Das Tastenkürzel ${info.shortcutLabel} ist bereits von einem anderen Programm belegt und steht nicht zur Verfügung.`;
     });
     desktop.onToggleRecording(() => (recording ? stopRecording() : startRecording()));
+    desktop.onSaveNote(async opts => desktop.noteSaved(await saveNote(opts)));
   }
 
   // ---------- Start ----------

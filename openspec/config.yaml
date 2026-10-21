@@ -10,6 +10,7 @@ context: |
   Unterstützte Browser: Chrome, Edge, Safari, Firefox
   Start lokal über "npx serve ." (Mikrofon braucht localhost oder https)
   Desktop-App: Electron (desktop/), lädt dieselben Dateien wie die Web-App, Pakete per electron-builder
+  Desktop-App: Aufnahme-Fenster in overlay.html/overlay.js, Symbole in desktop/assets/
   Notizen im Obsidian-Format: Markdown mit YAML-Frontmatter
   Artefakte auf Deutsch schreiben, Requirements mit SHALL oder MUST
 

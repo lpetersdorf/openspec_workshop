@@ -44,6 +44,7 @@ Wer im Workshop hängen bleibt, springt auf den nächsten Stand:
 | `stage-3-archived` | Change archiviert, `openspec/specs/` beschreibt die App |
 | `stage-4-whisper` | Change `lokale-transkription` umgesetzt und archiviert |
 | `stage-5-desktop` | Bonus: Change `desktop-app`, Blueforte Notes als Desktop-App für macOS und Windows |
+| `stage-6-menueleiste` | Bonus: Change `menueleiste`, Symbol in der Menüleiste und kleines Aufnahme-Fenster |
 
 ```bash
 git fetch origin
@@ -57,6 +58,7 @@ Blueforte Notes als echte App für macOS und Windows (Electron). Neu gegenüber 
 - **Notizordner:** einmal wählen (z. B. den Obsidian-Vault), Notizen landen dort direkt. Vorhandene Dateien werden nie überschrieben.
 - **Tastenkürzel:** `Cmd+Shift+D` (macOS) bzw. `Strg+Umschalt+D` (Windows) startet und stoppt die Aufnahme, auch im Hintergrund.
 - **Offline:** Nach dem ersten Modell-Download startet und transkribiert die App ohne Internet.
+- **Menüleiste (Stage 6):** Die App läuft nach dem Schließen des Fensters in der Menüleiste (macOS) bzw. im Infobereich (Windows) weiter. Das Tastenkürzel startet die Aufnahme, ohne das Fenster nach vorn zu holen. Ein kleines Aufnahme-Fenster oben am Bildschirm zeigt Pegel und Zeit, danach lässt sich die Notiz dort direkt speichern. Beenden über das Symbol.
 
 ### Selbst bauen
 
@@ -70,7 +72,7 @@ npm run dist:win     # Installer bauen (auf Windows), liegt danach in dist/
 
 ### Fertige Pakete
 
-Bei jedem Push auf `stage-5-desktop` baut GitHub Actions beide Pakete: **Actions → „Desktop-App bauen“ → Lauf öffnen → Artifacts**.
+Bei jedem Push auf `stage-5-desktop` und die folgenden Stages baut GitHub Actions beide Pakete: **Actions → „Desktop-App bauen“ → Lauf öffnen → Artifacts**.
 
 ### Unsignierte App öffnen
 

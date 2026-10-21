@@ -30,6 +30,8 @@
       "style.css",
       "app.js",
       "whisper-worker.js",
+      "overlay.html",
+      "overlay.js",
       "vendor/**",
       "desktop/**",
       "package.json"

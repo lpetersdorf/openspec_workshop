@@ -2,7 +2,7 @@ name: Desktop-App bauen
 
 on:
   push:
-    branches: [stage-5-desktop]
+    branches: [stage-5-desktop, 'stage-6-*', 'stage-7-*', 'stage-8-*']
     tags: ['v*']
   workflow_dispatch:
 
