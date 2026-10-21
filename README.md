@@ -43,6 +43,10 @@ Wer im Workshop hängen bleibt, springt auf den nächsten Stand:
 | `stage-2-applied` | Version 1 implementiert, alle Tasks abgehakt |
 | `stage-3-archived` | Change archiviert, `openspec/specs/` beschreibt die App |
 | `stage-4-whisper` | Change `lokale-transkription` umgesetzt und archiviert |
+| `stage-5-desktop` | Bonus: Desktop-App für macOS und Windows (Electron) |
+| `stage-6-menueleiste` | Bonus: Symbol in der Menüleiste und kleines Aufnahme-Fenster |
+| `stage-7-modellwahl` | Bonus: vier Whisper-Modelle von „Schnell“ bis „Sehr genau“ |
+| `stage-8-meeting` | Bonus: Meeting-Modus, Mikrofon und Systemton getrennt („Ich“ / „Gegenüber“) |
 
 ```bash
 git fetch origin
