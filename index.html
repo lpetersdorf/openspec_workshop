@@ -18,11 +18,17 @@
   <main class="wrap">
     <p class="notice" id="privacy">
       Das Audio bleibt auf diesem Gerät. Die Spracherkennung (Whisper) läuft lokal auf diesem Gerät.
-      Beim ersten Start wird das Modell einmalig geladen (ca. 80–210 MB).
+      Beim ersten Start wird das gewählte Modell einmalig geladen (Standard: ca. 80–210 MB).
     </p>
     <div class="model">
-      <span id="modelStatus">Modell wird vorbereitet …</span>
+      <div class="model-row">
+        <span id="modelStatus">Modell wird vorbereitet …</span>
+        <label class="model-pick">Modell
+          <select id="modelSelect" disabled><option>wird geprüft …</option></select>
+        </label>
+      </div>
       <div class="bar" aria-hidden="true"><div id="modelBar"></div></div>
+      <span class="model-hint" id="modelHint" hidden></span>
     </div>
     <p class="notice warn" id="problem" hidden></p>
     <div class="folder" id="folderRow" hidden>
@@ -44,6 +50,7 @@
 
     <div class="options">
       <label class="switch"><input type="checkbox" id="translate"> Ins Englische übersetzen</label>
+      <span class="model-hint" id="translateHint" hidden></span>
       <label class="upload">Audiodatei transkribieren
         <input type="file" id="fileInput" accept="audio/*,video/*">
       </label>

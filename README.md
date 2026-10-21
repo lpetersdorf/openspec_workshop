@@ -45,6 +45,7 @@ Wer im Workshop hängen bleibt, springt auf den nächsten Stand:
 | `stage-4-whisper` | Change `lokale-transkription` umgesetzt und archiviert |
 | `stage-5-desktop` | Bonus: Change `desktop-app`, Blueforte Notes als Desktop-App für macOS und Windows |
 | `stage-6-menueleiste` | Bonus: Change `menueleiste`, Symbol in der Menüleiste und kleines Aufnahme-Fenster |
+| `stage-7-modellwahl` | Bonus: Change `modell-waehlen`, vier Whisper-Modelle von „Schnell“ bis „Sehr genau“ |
 
 ```bash
 git fetch origin
@@ -97,4 +98,14 @@ Die App ist nicht mit einem Apple- oder Microsoft-Zertifikat signiert.
 
 - **Datenschutz:** In Version 1 schickt der Browser das Audio an den Erkennungsdienst des Herstellers (bei Chrome: Google). Bitte keine Kundeninhalte diktieren. Version 2 verarbeitet alles lokal.
 - **Whisper-Modell:** Version 2 lädt beim ersten Start das Modell `Xenova/whisper-base` von Hugging Face (ca. 210 MB mit Grafikkarte, ca. 80 MB ohne). Danach liegt es im Browser-Cache.
+- **Modell wählen (ab Stage 7):** Web-App und Desktop-App bieten vier Stufen. Die Größe hängt davon ab, ob eine Grafikkarte (WebGPU) genutzt wird:
+
+  | Stufe | Modell | mit Grafikkarte | ohne Grafikkarte |
+  |---|---|---|---|
+  | Schnell | Whisper tiny | ca. 120 MB | ca. 40 MB |
+  | Standard | Whisper base | ca. 210 MB | ca. 80 MB |
+  | Genau | Whisper small | ca. 590 MB | ca. 250 MB, langsam |
+  | Sehr genau | Whisper large-v3-turbo | ca. 0,8–1,6 GB | nicht verfügbar |
+
+  Auf schwachen Rechnern ohne Grafikkarte ist „Schnell“ die beste Wahl. „Sehr genau“ übersetzt nicht.
 - **Offline-Demo:** Seite öffnen, warten bis „Modell bereit“, dann WLAN aus und diktieren. Die Seite dabei nicht neu laden, denn die Bibliothek transformers.js kommt per CDN.

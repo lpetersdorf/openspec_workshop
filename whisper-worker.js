@@ -1,54 +1,72 @@
 /* Blueforte Notes – Whisper läuft lokal in diesem Web Worker. Audio verlässt das Gerät nicht. */
 const CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1';
-const MODEL = 'Xenova/whisper-base';
 
-let transcriber = null;
+let lib = null;           // transformers.js
+let transcriber = null;   // aktives Modell
+let activeKey = null;
 
-async function hasWebGPU() {
-  try { return !!(navigator.gpu && await navigator.gpu.requestAdapter()); } catch { return false; }
+async function capabilities() {
+  try {
+    const adapter = navigator.gpu && await navigator.gpu.requestAdapter();
+    return { webgpu: !!adapter, f16: !!(adapter && adapter.features.has('shader-f16')) };
+  } catch { return { webgpu: false, f16: false }; }
 }
 
 /** Desktop-App (und nach "npm install"): Bibliothek lokal aus vendor/, sonst vom CDN. */
 async function loadLibrary() {
+  if (lib) return lib;
   try {
-    const lib = await import('./vendor/transformers.min.js');
+    lib = await import('./vendor/transformers.min.js');
     lib.env.backends.onnx.wasm.wasmPaths = new URL('./vendor/', self.location.href).href;
-    return lib;
   } catch {
-    return import(CDN);
+    lib = await import(CDN);
   }
+  lib.env.allowLocalModels = false;   // Modell von Hugging Face laden …
+  lib.env.useBrowserCache = true;     // … und danach aus dem Cache
+  return lib;
 }
 
-async function load() {
-  const { pipeline, env } = await loadLibrary();
-  env.allowLocalModels = false;   // Modell von Hugging Face laden …
-  env.useBrowserCache = true;     // … und danach aus dem Cache
-  const webgpu = await hasWebGPU();
-  const device = webgpu ? 'webgpu' : 'wasm';
-  const dtype = webgpu
-    ? { encoder_model: 'fp32', decoder_model_merged: 'q4' }
-    : { encoder_model: 'q8', decoder_model_merged: 'q8' };
-  self.postMessage({ type: 'loading', device, model: MODEL });
-  transcriber = await pipeline('automatic-speech-recognition', MODEL, {
+/** Lädt ein Modell. Das bisherige bleibt aktiv, bis das neue bereit ist. */
+async function load({ key, id, device, dtype }) {
+  const { pipeline } = await loadLibrary();
+  self.postMessage({ type: 'loading', key, device, model: id });
+  const next = await pipeline('automatic-speech-recognition', id, {
     device,
     dtype,
     progress_callback: p => {
-      if (p.status === 'progress') self.postMessage({ type: 'progress', file: p.file, loaded: p.loaded, total: p.total });
+      if (p.status === 'progress') self.postMessage({ type: 'progress', key, file: p.file, loaded: p.loaded, total: p.total });
     }
   });
-  self.postMessage({ type: 'ready', device, model: MODEL });
+  const previous = transcriber;
+  transcriber = next;
+  activeKey = key;
+  if (previous) { try { await previous.dispose(); } catch { /* bereits freigegeben */ } }
+  self.postMessage({ type: 'ready', key, device, model: id });
 }
 
-const ready = load();
-ready.catch(err => self.postMessage({ type: 'load-error', message: String((err && err.message) || err) }));
-
-// Aufträge der Reihe nach abarbeiten; Aufträge vor Ende des Ladens warten auf das Modell
+// Aufträge warten auf das gerade ladende Modell. Bis zum ersten "load" wartet alles.
+let resolveFirst;
+let ready = new Promise(resolve => { resolveFirst = resolve; });
 let queue = Promise.resolve();
+
+capabilities().then(caps => self.postMessage({ type: 'caps', ...caps }));
+
 self.onmessage = ({ data }) => {
+  if (data.type === 'load') {
+    const loading = load(data);
+    // Bei Fehler arbeitet das bisherige Modell weiter (falls vorhanden)
+    const settled = loading.catch(err => {
+      self.postMessage({ type: 'load-error', key: data.key, keptPrevious: !!transcriber, previous: activeKey, message: String((err && err.message) || err) });
+    });
+    resolveFirst(settled);
+    ready = settled;
+    return;
+  }
   if (data.type !== 'transcribe') return;
   queue = queue.then(async () => {
     try {
       await ready;
+      if (!transcriber) throw new Error('Kein Modell geladen');
       const out = await transcriber(data.audio, {
         language: 'german',
         task: data.translate ? 'translate' : 'transcribe',

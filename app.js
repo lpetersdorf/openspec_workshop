@@ -144,10 +144,53 @@
     return !t || HALLUCINATIONS.some(re => re.test(t));
   }
 
+  // ---------- Modelle ----------
+
+  /** Die vier Stufen. Größen in MB aus den ONNX-Dateien auf Hugging Face (Encoder + Decoder). */
+  const MODELS = {
+    tiny: { label: 'Schnell', name: 'Whisper tiny', id: 'Xenova/whisper-tiny', mb: { gpu: 120, cpu: 40 } },
+    base: { label: 'Standard', name: 'Whisper base', id: 'Xenova/whisper-base', mb: { gpu: 210, cpu: 80 } },
+    small: { label: 'Genau', name: 'Whisper small', id: 'Xenova/whisper-small', mb: { gpu: 590, cpu: 250 }, slowOnCpu: true },
+    turbo: { label: 'Sehr genau', name: 'Whisper large-v3-turbo', id: 'onnx-community/whisper-large-v3-turbo', mb: { gpuF16: 1620, gpu: 760, cpu: null }, gpuOnly: true, noTranslate: true }
+  };
+  const DEFAULT_MODEL = 'base';
+  const DTYPE_SUFFIX = { fp32: '', fp16: '_fp16', q4: '_q4', q8: '_quantized' };
+
+  /** Gerät und Datentypen für ein Modell auf diesem Rechner. null = hier nicht nutzbar. */
+  function modelDtype(key, caps) {
+    const m = MODELS[key];
+    if (!m || !caps) return null;
+    if (!caps.webgpu) return m.gpuOnly ? null : { device: 'wasm', dtype: { encoder_model: 'q8', decoder_model_merged: 'q8' } };
+    if (key === 'turbo') return { device: 'webgpu', dtype: { encoder_model: caps.f16 ? 'fp16' : 'q4', decoder_model_merged: 'q4' } };
+    return { device: 'webgpu', dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' } };
+  }
+
+  /** Modelldateien, die dieser Rechner lädt (für „geladen“). */
+  function modelFiles(key, caps) {
+    const d = modelDtype(key, caps);
+    if (!d) return [];
+    return [
+      `${MODELS[key].id}/resolve/main/onnx/encoder_model${DTYPE_SUFFIX[d.dtype.encoder_model]}.onnx`,
+      `${MODELS[key].id}/resolve/main/onnx/decoder_model_merged${DTYPE_SUFFIX[d.dtype.decoder_model_merged]}.onnx`
+    ];
+  }
+
+  /** Download-Größe in MB auf diesem Rechner, null = nicht verfügbar. */
+  function modelSize(key, caps) {
+    const mb = MODELS[key].mb;
+    if (!caps.webgpu) return mb.cpu;
+    return caps.f16 && mb.gpuF16 ? mb.gpuF16 : mb.gpu;
+  }
+
+  function sizeLabel(mb) {
+    return mb >= 1000 ? `${(mb / 1000).toFixed(1).replace('.', ',')} GB` : `${mb} MB`;
+  }
+
   // Für Tests im Browser verfügbar machen
   window.BFN = {
     applyGlossary, formatDuration, noteFilename, buildNote, buildClaudePrompt, appendText, countWords,
-    rms, downsample, Segmenter, isHallucination, DEFAULT_GLOSSARY
+    rms, downsample, Segmenter, isHallucination, DEFAULT_GLOSSARY,
+    MODELS, modelDtype, modelFiles, modelSize, sizeLabel
   };
 
   // ---------- Glossar-Speicher ----------
@@ -174,7 +217,8 @@
     file: $('fileInput'), translate: $('translate'),
     copy: $('copyBtn'), note: $('noteBtn'), claude: $('claudeBtn'), clear: $('clearBtn'), toast: $('toast'),
     gList: $('glossaryList'), gCount: $('glossaryCount'), gForm: $('glossaryForm'), gFrom: $('gFrom'), gTo: $('gTo'),
-    folderRow: $('folderRow'), folderPath: $('folderPath'), folderBtn: $('folderBtn'), shortcutHint: $('shortcutHint')
+    folderRow: $('folderRow'), folderPath: $('folderPath'), folderBtn: $('folderBtn'), shortcutHint: $('shortcutHint'),
+    modelSelect: $('modelSelect'), modelHint: $('modelHint'), translateHint: $('translateHint')
   };
 
   // In der Desktop-App stellt preload.js diese Schnittstelle bereit, im Browser fehlt sie
@@ -322,39 +366,150 @@
     if (recording) ui.status.textContent = pending ? `Hört zu … · ${pending} in Arbeit` : 'Hört zu …';
     else ui.status.textContent = pending ? `Transkribiert (${pending}) …` : 'Bereit';
     ui.interim.textContent = pending ? (modelReady ? 'Text wird verarbeitet …' : 'Wartet auf das Modell …') : '';
+    lockModelSelect();
     pushState();
+  }
+
+  // ---------- Modellwahl ----------
+
+  const MODEL_KEY = 'bfn-modell';
+  let caps = null;              // { webgpu, f16 } vom Worker
+  let activeModel = null;       // Modell, mit dem gerade transkribiert wird
+  let loadingModel = null;      // Modell, das gerade lädt
+  let cachedKeys = new Set();
+
+  function savedModel() {
+    try { return localStorage.getItem(MODEL_KEY) || DEFAULT_MODEL; } catch { return DEFAULT_MODEL; }
+  }
+
+  async function findCached() {
+    try {
+      if (typeof caches === 'undefined') return new Set();
+      const cache = await caches.open('transformers-cache');
+      const urls = (await cache.keys()).map(r => r.url);
+      return new Set(Object.keys(MODELS).filter(k => {
+        const files = modelFiles(k, caps);
+        return files.length && files.every(f => urls.some(u => u.endsWith(f)));
+      }));
+    } catch { return new Set(); }
+  }
+
+  function renderModelSelect() {
+    if (!caps) return;
+    const selected = loadingModel || activeModel || savedModel();
+    ui.modelSelect.innerHTML = '';
+    Object.entries(MODELS).forEach(([key, m]) => {
+      const opt = document.createElement('option');
+      opt.value = key;
+      const usable = !!modelDtype(key, caps);
+      const extra = !usable ? 'nur mit Grafikkarte'
+        : cachedKeys.has(key) ? 'geladen'
+        : sizeLabel(modelSize(key, caps));
+      opt.textContent = `${m.label} · ${m.name.replace('Whisper ', '')} · ${extra}`;
+      opt.disabled = !usable;
+      ui.modelSelect.append(opt);
+    });
+    ui.modelSelect.value = selected;
+    renderModelHints();
+  }
+
+  function renderModelHints() {
+    const m = MODELS[loadingModel || activeModel];
+    const slow = !!(m && m.slowOnCpu && caps && !caps.webgpu);
+    ui.modelHint.textContent = slow
+      ? `„${m.label}“ läuft ohne Grafikkarte auf dem Prozessor und braucht deutlich länger. Für dieses Gerät sind „Schnell“ oder „Standard“ besser geeignet.`
+      : '';
+    ui.modelHint.hidden = !slow;
+    const noTranslate = !!(m && m.noTranslate);
+    if (noTranslate) ui.translate.checked = false;
+    ui.translate.disabled = noTranslate;
+    ui.translateHint.hidden = !noTranslate;
+    ui.translateHint.textContent = noTranslate ? `„${m.label}“ übersetzt nicht. Zum Übersetzen „Standard“ oder „Genau“ wählen.` : '';
+  }
+
+  function lockModelSelect() {
+    ui.modelSelect.disabled = !caps || recording || pending > 0 || !!loadingModel;
+  }
+
+  function requestModel(key) {
+    const d = modelDtype(key, caps);
+    if (!d) return;
+    loadingModel = key;
+    progress.clear();
+    ui.modelBar.style.width = '0%';
+    worker.postMessage({ type: 'load', key, id: MODELS[key].id, device: d.device, dtype: d.dtype });
+    renderModelSelect();
+    lockModelSelect();
+  }
+
+  ui.modelSelect.addEventListener('change', () => {
+    const key = ui.modelSelect.value;
+    if (key === activeModel || key === loadingModel) return;
+    showProblem('');
+    requestModel(key);
+  });
+
+  function modelLabel(key) {
+    const m = MODELS[key];
+    return m ? `„${m.label}“ (${m.name})` : 'Modell';
   }
 
   worker.addEventListener('message', ({ data }) => {
     switch (data.type) {
-      case 'loading':
-        ui.model.textContent = 'Modell wird geladen …';
+      case 'caps': {
+        caps = { webgpu: !!data.webgpu, f16: !!data.f16 };
+        let key = savedModel();
+        if (!modelDtype(key, caps)) key = DEFAULT_MODEL;   // z. B. „Sehr genau“ ohne Grafikkarte
+        findCached().then(set => { cachedKeys = new Set([...set, ...cachedKeys]); renderModelSelect(); });
+        requestModel(key);
         break;
+      }
+      case 'loading': {
+        const mb = caps ? modelSize(data.key, caps) : null;
+        const size = cachedKeys.has(data.key) || !mb ? '' : ` (ca. ${sizeLabel(mb)})`;
+        ui.model.textContent = `${modelLabel(data.key)} wird geladen${size} …`;
+        break;
+      }
       case 'progress': {
         progress.set(data.file, { loaded: data.loaded || 0, total: data.total || 0 });
         let loaded = 0, total = 0;
         progress.forEach(p => { loaded += p.loaded; total += p.total; });
         const pct = total ? Math.min(100, Math.round(loaded / total * 100)) : 0;
-        ui.model.textContent = `Modell wird geladen: ${pct} %`;
+        ui.model.textContent = `${modelLabel(data.key)} wird geladen: ${pct} %`;
         ui.modelBar.style.width = `${pct}%`;
         break;
       }
-      case 'ready':
+      case 'ready': {
         modelReady = true;
+        activeModel = data.key || activeModel || DEFAULT_MODEL;
+        loadingModel = null;
+        cachedKeys.add(activeModel);
+        try { localStorage.setItem(MODEL_KEY, activeModel); } catch { /* privat-Modus */ }
         ui.modelBar.style.width = '100%';
-        ui.model.textContent = data.device === 'webgpu'
-          ? 'Modell bereit · Grafikkarte'
-          : 'Modell bereit · Prozessor';
-        ui.engine.textContent = desktop ? 'Desktop · Whisper base' : 'Lokal · Whisper base';
+        ui.model.textContent = data.device === 'webgpu' ? 'Modell bereit · Grafikkarte' : 'Modell bereit · Prozessor';
+        ui.engine.textContent = `${desktop ? 'Desktop' : 'Lokal'} · ${MODELS[activeModel].name}`;
         if (data.device !== 'webgpu') {
           showProblem('Dieser Browser bietet keine Grafikbeschleunigung (WebGPU). Die Transkription läuft auf dem Prozessor und dauert länger.');
         }
+        renderModelSelect();
+        lockModelSelect();
         renderStatus();
         break;
-      case 'load-error':
-        ui.model.textContent = 'Modell nicht geladen';
-        showProblem('Das Spracherkennungsmodell konnte nicht geladen werden. Für den ersten Start ist einmalig eine Internetverbindung nötig. Danach funktioniert die App auch offline.');
+      }
+      case 'load-error': {
+        loadingModel = null;
+        if (data.keptPrevious && activeModel) {
+          ui.model.textContent = 'Modell bereit';
+          ui.modelBar.style.width = '100%';
+          showProblem(`${modelLabel(data.key)} konnte nicht geladen werden. Für den ersten Download eines Modells ist eine Internetverbindung nötig. Es bleibt bei ${modelLabel(activeModel)}.`);
+        } else {
+          ui.model.textContent = 'Modell nicht geladen';
+          showProblem('Das Spracherkennungsmodell konnte nicht geladen werden. Für den ersten Start ist einmalig eine Internetverbindung nötig. Danach funktioniert die App auch offline.');
+        }
+        renderModelSelect();
+        lockModelSelect();
         break;
+      }
       case 'result': {
         pending = Math.max(0, pending - 1);
         if (!isHallucination(data.text)) {
@@ -498,7 +653,7 @@
       if (f) { renderFolder(f); showProblem(''); toast('Notizordner gespeichert'); }
     });
     desktop.info().then(info => {
-      ui.engine.textContent = 'Desktop · Whisper';
+      if (!activeModel) ui.engine.textContent = 'Desktop · Whisper';
       ui.shortcutHint.textContent = info.shortcut
         ? `Tastenkürzel ${info.shortcut} startet und stoppt die Aufnahme, auch bei geschlossenem Fenster.`
         : `Das Tastenkürzel ${info.shortcutLabel} ist bereits von einem anderen Programm belegt und steht nicht zur Verfügung.`;

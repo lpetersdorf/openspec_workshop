@@ -75,6 +75,12 @@ textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--acc
 .model { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--fg2); }
 .model .bar { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
 .model .bar > div { height: 100%; width: 0; background: var(--grad); transition: width .3s ease; }
+.model-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.model-pick { display: inline-flex; align-items: center; gap: 8px; color: var(--fg2); }
+.model-pick select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; max-width: 100%; }
+.model-pick select:disabled { opacity: .6; }
+.model-hint { font-size: 13px; color: var(--warn-fg); }
+.switch:has(input:disabled) { opacity: .5; cursor: not-allowed; }
 
 .options { display: flex; gap: 20px; flex-wrap: wrap; align-items: center; }
 .switch { display: inline-flex; gap: 8px; align-items: center; cursor: pointer; }
