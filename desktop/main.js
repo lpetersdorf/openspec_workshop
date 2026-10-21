@@ -1,7 +1,7 @@
 // Blueforte Notes – Desktop-App (Electron)
 const {
   app, BrowserWindow, protocol, ipcMain, dialog, globalShortcut, session, systemPreferences, shell,
-  Tray, Menu, nativeImage, screen, Notification
+  Tray, Menu, nativeImage, screen, Notification, desktopCapturer
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -45,6 +45,21 @@ function uniquePath(dir, filename) {
   let candidate = path.join(dir, filename);
   for (let i = 2; fs.existsSync(candidate); i++) candidate = path.join(dir, `${base} ${i}${ext}`);
   return candidate;
+}
+
+/**
+ * Kann dieses System den Systemton aufnehmen (Meeting-Modus)?
+ * Windows: Loopback. macOS: ab 14.2 über Core Audio Tap. Linux: nicht im Umfang.
+ */
+function systemAudioSupport() {
+  if (process.env.BFN_SYSTEM_AUDIO === '1') return { ok: true };   // nur für automatische Tests
+  if (process.platform === 'win32') return { ok: true };
+  if (process.platform === 'darwin') {
+    const [major, minor] = process.getSystemVersion().split('.').map(Number);
+    if (major > 14 || (major === 14 && minor >= 2)) return { ok: true };
+    return { ok: false, reason: 'Der Meeting-Modus braucht macOS 14.2 oder neuer.' };
+  }
+  return { ok: false, reason: 'Der Meeting-Modus ist nur unter macOS und Windows verfügbar.' };
 }
 
 let win = null;
@@ -275,16 +290,30 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     // Mikrofon und Zwischenablage für die eigene Oberfläche erlauben
-    const allowed = new Set(['media', 'clipboard-sanitized-write', 'notifications']);
+    const allowed = new Set(['media', 'clipboard-sanitized-write', 'notifications', 'display-capture']);
     session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => callback(allowed.has(permission)));
     session.defaultSession.setPermissionCheckHandler((_wc, permission) => allowed.has(permission));
+
+    // Meeting-Modus: Systemton über die Bildschirmfreigabe (Loopback). Die Videospur stoppt app.js sofort.
+    session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+      try {
+        const sources = await desktopCapturer.getSources({ types: ['screen'] });
+        if (!sources.length) { callback({}); return; }
+        callback({ video: sources[0], audio: 'loopback' });
+      } catch {
+        callback({});
+      }
+    });
 
     // ---------- Schnittstelle für die Oberfläche ----------
     ipcMain.handle('app:info', () => ({
       platform: process.platform,
       shortcut: shortcutOk ? SHORTCUT_LABEL : null,
-      shortcutLabel: SHORTCUT_LABEL
+      shortcutLabel: SHORTCUT_LABEL,
+      systemAudio: systemAudioSupport()
     }));
+
+    ipcMain.on('win:show', showMain);
 
     ipcMain.handle('folder:get', () => {
       const folder = readSettings().folder;

@@ -26,7 +26,12 @@
     .row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
     #status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg2); }
     #time { font-variant-numeric: tabular-nums; font-weight: 600; }
-    .meter { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+    .meters { display: flex; flex-direction: column; gap: 3px; }
+    .meter-row { display: flex; align-items: center; gap: 6px; }
+    .who { flex: none; width: 62px; font-size: 10px; letter-spacing: .04em; color: var(--fg2); }
+    .meter { flex: 1; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+    .meeting .main { gap: 3px; }
+    [hidden] { display: none !important; }
     .meter > div { height: 100%; width: 0; background: var(--accent); transition: width 80ms linear; }
     .buttons { display: flex; gap: 6px; -webkit-app-region: no-drag; }
     button {
@@ -44,7 +49,10 @@
     <span class="dot" aria-hidden="true"></span>
     <div class="main">
       <div class="row"><span id="status">Bereit</span><span id="time">0:00</span></div>
-      <div class="meter" aria-hidden="true"><div id="level"></div></div>
+      <div class="meters" aria-hidden="true">
+        <div class="meter-row"><span class="who" id="whoMe" hidden>Ich</span><div class="meter"><div id="level"></div></div></div>
+        <div class="meter-row" id="themRow" hidden><span class="who">Gegenüber</span><div class="meter"><div id="level2"></div></div></div>
+      </div>
     </div>
     <div class="buttons">
       <button type="button" class="primary" id="stop">Stopp</button>

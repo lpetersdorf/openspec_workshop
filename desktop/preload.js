@@ -12,5 +12,7 @@ contextBridge.exposeInMainWorld('bfnDesktop', {
   sendState: state => ipcRenderer.send('ui:state', state),
   sendLevel: level => ipcRenderer.send('ui:level', level),
   onSaveNote: callback => ipcRenderer.on('save-note', (_e, opts) => callback(opts || {})),
-  noteSaved: result => ipcRenderer.send('ui:saved', result)
+  noteSaved: result => ipcRenderer.send('ui:saved', result),
+  // Meeting-Modus: Hauptfenster öffnen, z. B. wenn das Einverständnis fehlt
+  showWindow: () => ipcRenderer.send('win:show')
 });

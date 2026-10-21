@@ -48,6 +48,15 @@
       </div>
     </section>
 
+    <div class="meeting" id="meetingBox" hidden>
+      <label class="switch"><input type="checkbox" id="meeting"> Meeting-Modus: Mikrofon und Systemton (z. B. Teams)</label>
+      <div class="meeting-details" id="meetingDetails" hidden>
+        <label class="switch consent"><input type="checkbox" id="consent"> Alle Beteiligten wissen von der Aufnahme und sind einverstanden.</label>
+        <span class="model-hint">Bitte ein Headset verwenden. Sonst nimmt das Mikrofon die Gegenseite aus dem Lautsprecher mit auf, und ihr Text erscheint doppelt.</span>
+      </div>
+      <span class="model-hint" id="meetingUnavailable" hidden></span>
+    </div>
+
     <div class="options">
       <label class="switch"><input type="checkbox" id="translate"> Ins Englische übersetzen</label>
       <span class="model-hint" id="translateHint" hidden></span>

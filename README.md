@@ -46,6 +46,7 @@ Wer im Workshop hängen bleibt, springt auf den nächsten Stand:
 | `stage-5-desktop` | Bonus: Change `desktop-app`, Blueforte Notes als Desktop-App für macOS und Windows |
 | `stage-6-menueleiste` | Bonus: Change `menueleiste`, Symbol in der Menüleiste und kleines Aufnahme-Fenster |
 | `stage-7-modellwahl` | Bonus: Change `modell-waehlen`, vier Whisper-Modelle von „Schnell“ bis „Sehr genau“ |
+| `stage-8-meeting` | Bonus: Change `meeting-modus`, Mikrofon und Systemton getrennt transkribiert („Ich“ / „Gegenüber“) |
 
 ```bash
 git fetch origin
@@ -60,6 +61,12 @@ Blueforte Notes als echte App für macOS und Windows (Electron). Neu gegenüber 
 - **Tastenkürzel:** `Cmd+Shift+D` (macOS) bzw. `Strg+Umschalt+D` (Windows) startet und stoppt die Aufnahme, auch im Hintergrund.
 - **Offline:** Nach dem ersten Modell-Download startet und transkribiert die App ohne Internet.
 - **Menüleiste (Stage 6):** Die App läuft nach dem Schließen des Fensters in der Menüleiste (macOS) bzw. im Infobereich (Windows) weiter. Das Tastenkürzel startet die Aufnahme, ohne das Fenster nach vorn zu holen. Ein kleines Aufnahme-Fenster oben am Bildschirm zeigt Pegel und Zeit, danach lässt sich die Notiz dort direkt speichern. Beenden über das Symbol.
+
+- **Meeting-Modus (Stage 8):** nimmt zusätzlich den Systemton auf, also die Gegenseite in Teams, Zoom oder Webex. Beide Seiten werden getrennt transkribiert und als „Ich“ und „Gegenüber“ gekennzeichnet. Gespeichert wird als „… Meeting.md“ mit Tag `meeting`.
+  - Vor jeder Meeting-Aufnahme bestätigen, dass alle Beteiligten einverstanden sind.
+  - **Headset verwenden**, sonst nimmt das Mikrofon die Gegenseite aus dem Lautsprecher mit auf.
+  - **Windows:** funktioniert ohne weitere Einstellungen.
+  - **macOS 14.2 oder neuer:** Beim ersten Meeting fragt macOS nach der Freigabe für „Bildschirm- & Systemaudioaufnahme“. Zuverlässig nur in der gebauten App (`npm run dist:mac`); beim Start aus dem Terminal hängt der Systemton an den Rechten des Terminals.
 
 ### Selbst bauen
 

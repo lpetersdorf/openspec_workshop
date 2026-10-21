@@ -123,3 +123,6 @@ button.ghost { border-color: transparent; color: var(--fg2); }
 .folder-path { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
 .folder button { padding: 6px 12px; font-size: 14px; }
 .shortcut { color: var(--fg2); width: 100%; }
+.meeting { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 6px; }
+.meeting-details { display: flex; flex-direction: column; gap: 6px; padding-left: 26px; }
+.consent { font-size: 15px; }

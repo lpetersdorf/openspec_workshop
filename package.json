@@ -44,7 +44,8 @@
       "identity": "-",
       "hardenedRuntime": false,
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "Blueforte Notes braucht das Mikrofon zum Diktieren. Das Audio bleibt auf diesem Gerät."
+        "NSMicrophoneUsageDescription": "Blueforte Notes braucht das Mikrofon zum Diktieren. Das Audio bleibt auf diesem Gerät.",
+        "NSAudioCaptureUsageDescription": "Im Meeting-Modus nimmt Blueforte Notes den Ton der Gegenseite auf. Das Audio bleibt auf diesem Gerät."
       }
     },
     "win": {

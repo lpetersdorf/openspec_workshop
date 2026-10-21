@@ -31,11 +31,11 @@
     return `${Math.floor(s / 60)}:${pad(s % 60)}`;
   }
 
-  function noteFilename(date) {
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}${pad(date.getMinutes())} Diktat.md`;
+  function noteFilename(date, { meeting = false } = {}) {
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}${pad(date.getMinutes())} ${meeting ? 'Meeting' : 'Diktat'}.md`;
   }
 
-  function buildNote(text, date, durationMs) {
+  function buildNote(text, date, durationMs, { meeting = false } = {}) {
     const iso = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
     const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
     const human = `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}, ${time} Uhr`;
@@ -44,10 +44,10 @@
       `datum: ${iso}`,
       `uhrzeit: "${time}"`,
       `dauer: "${formatDuration(durationMs)}"`,
-      'tags: [diktat]',
+      meeting ? 'tags: [diktat, meeting]' : 'tags: [diktat]',
       '---',
       '',
-      `# Diktat ${human}`,
+      `# ${meeting ? 'Meeting' : 'Diktat'} ${human}`,
       '',
       text.trim(),
       ''
@@ -65,6 +65,21 @@
     if (!add) return existing;
     if (!existing) return add;
     return /\s$/.test(existing) ? existing + add : `${existing} ${add}`;
+  }
+
+  /** Meeting-Modus: Mikrofon = „Ich“, Systemton = „Gegenüber“. */
+  const SPEAKERS = { me: 'Ich', them: 'Gegenüber' };
+
+  /**
+   * Hängt einen Abschnitt eines Sprechers an: gleicher Sprecher → an seinen Absatz,
+   * neuer Sprecher → neuer Absatz mit Kennzeichnung. Liefert Text und letzten Sprecher.
+   */
+  function appendTurn(existing, speaker, addition, lastSpeaker) {
+    const add = addition.trim();
+    if (!add) return { text: existing, last: lastSpeaker };
+    if (speaker === lastSpeaker && existing.trim()) return { text: appendText(existing, add), last: speaker };
+    const turn = `**${SPEAKERS[speaker]}:** ${add}`;
+    return { text: existing.trim() ? `${existing.replace(/\s+$/, '')}\n\n${turn}` : turn, last: speaker };
   }
 
   /** Lautstärke eines Puffers (Effektivwert). */
@@ -188,7 +203,7 @@
 
   // Für Tests im Browser verfügbar machen
   window.BFN = {
-    applyGlossary, formatDuration, noteFilename, buildNote, buildClaudePrompt, appendText, countWords,
+    applyGlossary, formatDuration, noteFilename, buildNote, buildClaudePrompt, appendText, countWords, appendTurn,
     rms, downsample, Segmenter, isHallucination, DEFAULT_GLOSSARY,
     MODELS, modelDtype, modelFiles, modelSize, sizeLabel
   };
@@ -218,7 +233,8 @@
     copy: $('copyBtn'), note: $('noteBtn'), claude: $('claudeBtn'), clear: $('clearBtn'), toast: $('toast'),
     gList: $('glossaryList'), gCount: $('glossaryCount'), gForm: $('glossaryForm'), gFrom: $('gFrom'), gTo: $('gTo'),
     folderRow: $('folderRow'), folderPath: $('folderPath'), folderBtn: $('folderBtn'), shortcutHint: $('shortcutHint'),
-    modelSelect: $('modelSelect'), modelHint: $('modelHint'), translateHint: $('translateHint')
+    modelSelect: $('modelSelect'), modelHint: $('modelHint'), translateHint: $('translateHint'),
+    meetingBox: $('meetingBox'), meeting: $('meeting'), meetingDetails: $('meetingDetails'), consent: $('consent'), meetingUnavailable: $('meetingUnavailable')
   };
 
   // In der Desktop-App stellt preload.js diese Schnittstelle bereit, im Browser fehlt sie
@@ -226,6 +242,10 @@
   let folder = null;
   let savedText = '';          // zuletzt gespeicherter Stand, für „ungespeicherter Text“
   let sessionStartWords = 0;   // Wörter vor der laufenden Aufnahme
+  let desktopInfo = null;
+  let lastSpeaker = null;      // Meeting-Modus: wer hat zuletzt gesprochen?
+  let meetingContent = false;  // Text enthält Meeting-Abschnitte → Meeting-Notiz
+  let meetingRecording = false;
 
   /** Meldet den Zustand an die Desktop-App (Menüleiste, Aufnahme-Fenster, Nachfrage beim Beenden). */
   function pushState() {
@@ -236,6 +256,7 @@
       pending,
       dirty: !!text && text !== savedText,
       elapsedMs: totalMs(),
+      meeting: meetingRecording,
       words: Math.max(0, countWords(ui.text.value) - sessionStartWords)
     });
   }
@@ -316,7 +337,10 @@
   function markSaved() { savedText = ui.text.value.trim(); pushState(); }
 
   function clearText() {
-    ui.text.value = ''; recordedMs = 0; sessionStartWords = 0; renderTimer(); updateButtons();
+    ui.text.value = ''; recordedMs = 0; sessionStartWords = 0;
+    lastSpeaker = null; meetingContent = false;
+    ui.consent.checked = false;   // nächstes Meeting neu bestätigen
+    renderTimer(); updateButtons();
   }
 
   /**
@@ -326,8 +350,8 @@
   async function saveNote({ fromOverlay = false } = {}) {
     if (!ui.text.value.trim()) return { ok: false, reason: 'empty' };
     const now = new Date();
-    const filename = noteFilename(now);
-    const content = buildNote(ui.text.value, now, totalMs());
+    const filename = noteFilename(now, { meeting: meetingContent });
+    const content = buildNote(ui.text.value, now, totalMs(), { meeting: meetingContent });
     if (desktop && folder) {
       const res = await desktop.saveNote(filename, content);
       if (res.ok) {
@@ -512,8 +536,16 @@
       }
       case 'result': {
         pending = Math.max(0, pending - 1);
+        const speaker = speakers.get(data.id);
+        speakers.delete(data.id);
         if (!isHallucination(data.text)) {
-          ui.text.value = appendText(ui.text.value, applyGlossary(data.text, glossary));
+          const clean = applyGlossary(data.text, glossary);
+          if (speaker) {
+            const turn = appendTurn(ui.text.value, speaker, clean, lastSpeaker);
+            ui.text.value = turn.text; lastSpeaker = turn.last; meetingContent = true;
+          } else {
+            ui.text.value = appendText(ui.text.value, clean); lastSpeaker = null;
+          }
           ui.text.scrollTop = ui.text.scrollHeight;
           updateButtons();
         }
@@ -522,6 +554,7 @@
       }
       case 'error':
         pending = Math.max(0, pending - 1);
+        speakers.delete(data.id);
         // Ohne Modell steht der Hinweis zum Laden bereits da
         if (!data.modelMissing) showProblem(`Ein Abschnitt konnte nicht transkribiert werden: ${data.message}`);
         renderStatus();
@@ -529,18 +562,23 @@
     }
   });
 
+  const speakers = new Map();   // Auftrag → Sprecher (Meeting-Modus)
+
   /** Schickt Audio (beliebige Rate) als 16-kHz-Mono an den Worker. */
-  function transcribe(samples, sampleRate) {
+  function transcribe(samples, sampleRate, speaker) {
     const audio = downsample(samples, sampleRate, 16000);
+    const id = nextId++;
+    if (speaker) speakers.set(id, speaker);
     pending++;
     renderStatus();
-    worker.postMessage({ type: 'transcribe', id: nextId++, audio, translate: ui.translate.checked }, [audio.buffer]);
+    worker.postMessage({ type: 'transcribe', id, audio, translate: ui.translate.checked }, [audio.buffer]);
   }
 
   // ---------- Aufnahme ----------
 
   let recording = false;
-  let stream = null, ctx = null, processor = null, segmenter = null;
+  let starting = false;
+  let streams = [], ctx = null, processor = null, segmenters = null;
   let recordedMs = 0, segmentStart = 0, tick = null;
 
   const totalMs = () => recordedMs + (recording && segmentStart ? Date.now() - segmentStart : 0);
@@ -549,6 +587,7 @@
   function setRecordingUI(on) {
     ui.rec.setAttribute('aria-pressed', String(on));
     ui.recLabel.textContent = on ? 'Stopp' : 'Aufnahme';
+    ui.meeting.disabled = on || !(desktopInfo && desktopInfo.systemAudio && desktopInfo.systemAudio.ok);
     renderStatus();
   }
 
@@ -556,34 +595,90 @@
     ? 'Kein Zugriff auf das Mikrofon. Bitte in den Systemeinstellungen unter Datenschutz › Mikrofon „Blueforte Notes“ erlauben und die App neu starten.'
     : 'Kein Zugriff auf das Mikrofon. Bitte in den Browser-Einstellungen für diese Seite das Mikrofon erlauben (Schloss-Symbol in der Adresszeile) und die App über localhost öffnen.';
 
+  const CONSENT_HINT = 'Für eine Meeting-Aufnahme bitte zuerst bestätigen, dass alle Beteiligten von der Aufnahme wissen und einverstanden sind.';
+
+  function systemAudioHint() {
+    return desktopInfo && desktopInfo.platform === 'darwin'
+      ? 'Der Systemton konnte nicht aufgenommen werden. Bitte unter Systemeinstellungen › Datenschutz & Sicherheit › „Bildschirm- & Systemaudioaufnahme“ Blueforte Notes erlauben und die App neu starten.'
+      : 'Der Systemton konnte nicht aufgenommen werden. Bitte prüfen, ob ein Lautsprecher oder Headset als Wiedergabegerät aktiv ist, und die App neu starten.';
+  }
+
+  function stopStreams(list) { list.forEach(s => s && s.getTracks().forEach(t => t.stop())); }
+
+  /** Zeigt ein Problem und holt das Hauptfenster nach vorn (Start per Tastenkürzel oder Menü). */
+  function problemInWindow(msg) {
+    showProblem(msg);
+    if (desktop) desktop.showWindow();
+  }
+
   async function startRecording() {
+    if (recording || starting) return;
+    starting = true;
+    try { await beginRecording(); } finally { starting = false; }
+  }
+
+  async function beginRecording() {
     showProblem('');
-    if (desktop && !(await desktop.ensureMic())) { showProblem(MIC_HINT); return; }
+    const meeting = !!(desktop && ui.meeting.checked);
+    if (meeting && !ui.consent.checked) { problemInWindow(CONSENT_HINT); ui.consent.focus(); return; }
+    if (desktop && !(await desktop.ensureMic())) { problemInWindow(MIC_HINT); return; }
+    let mic;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+      mic = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
     } catch (err) {
-      if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {
-        showProblem(MIC_HINT);
-      } else {
-        showProblem('Kein Mikrofon gefunden. Bitte ein Mikrofon anschließen.');
-      }
+      problemInWindow(err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')
+        ? MIC_HINT
+        : 'Kein Mikrofon gefunden. Bitte ein Mikrofon anschließen.');
       return;
     }
+
+    // Meeting-Modus: Systemton über die Bildschirmfreigabe, nur die Tonspur wird gebraucht
+    let system = null;
+    if (meeting) {
+      try { system = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true }); } catch { system = null; }
+      if (system) system.getVideoTracks().forEach(t => t.stop());
+      if (!system || !system.getAudioTracks().length) {
+        stopStreams([mic, system]);
+        problemInWindow(systemAudioHint());
+        return;
+      }
+    }
+
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     ctx = new AudioCtx();
-    const source = ctx.createMediaStreamSource(stream);
+    const rate = ctx.sampleRate;
+    streams = [mic, system].filter(Boolean);
     // ScriptProcessorNode: veraltet, aber überall verfügbar und für diese Größe ausreichend (siehe design.md)
-    processor = ctx.createScriptProcessor(4096, 1, 1);
-    segmenter = new Segmenter({ sampleRate: ctx.sampleRate });
-    processor.onaudioprocess = e => {
-      if (!recording) return;
-      const buf = Float32Array.from(e.inputBuffer.getChannelData(0));
-      if (desktop) desktop.sendLevel(rms(buf));
-      segmenter.push(buf).forEach(seg => transcribe(seg, ctx.sampleRate));
-    };
-    source.connect(processor);
+    if (meeting) {
+      // Kanal 0 = Mikrofon („Ich“), Kanal 1 = Systemton („Gegenüber“), je eigener Segmentierer
+      const merger = ctx.createChannelMerger(2);
+      ctx.createMediaStreamSource(mic).connect(merger, 0, 0);
+      ctx.createMediaStreamSource(system).connect(merger, 0, 1);
+      processor = ctx.createScriptProcessor(4096, 2, 1);
+      segmenters = { me: new Segmenter({ sampleRate: rate }), them: new Segmenter({ sampleRate: rate }) };
+      processor.onaudioprocess = e => {
+        if (!recording) return;
+        const me = Float32Array.from(e.inputBuffer.getChannelData(0));
+        const them = Float32Array.from(e.inputBuffer.getChannelData(1));
+        if (desktop) desktop.sendLevel({ me: rms(me), them: rms(them) });
+        segmenters.me.push(me).forEach(seg => transcribe(seg, rate, 'me'));
+        segmenters.them.push(them).forEach(seg => transcribe(seg, rate, 'them'));
+      };
+      merger.connect(processor);
+    } else {
+      processor = ctx.createScriptProcessor(4096, 1, 1);
+      segmenters = { solo: new Segmenter({ sampleRate: rate }) };
+      processor.onaudioprocess = e => {
+        if (!recording) return;
+        const buf = Float32Array.from(e.inputBuffer.getChannelData(0));
+        if (desktop) desktop.sendLevel(rms(buf));
+        segmenters.solo.push(buf).forEach(seg => transcribe(seg, rate));
+      };
+      ctx.createMediaStreamSource(mic).connect(processor);
+    }
     processor.connect(ctx.destination);
 
+    meetingRecording = meeting;
     recording = true;
     segmentStart = Date.now();
     sessionStartWords = countWords(ui.text.value);
@@ -592,18 +687,21 @@
   }
 
   function stopRecording() {
-    if (recording && segmentStart) recordedMs += Date.now() - segmentStart;
+    if (!recording) return;
+    if (segmentStart) recordedMs += Date.now() - segmentStart;
     recording = false;
     segmentStart = 0;
     clearInterval(tick); renderTimer();
-    if (segmenter && ctx) {
-      const rest = segmenter.flush();
-      if (rest) transcribe(rest, ctx.sampleRate);
+    if (segmenters && ctx) {
+      Object.entries(segmenters).forEach(([who, seg]) => {
+        const rest = seg.flush();
+        if (rest) transcribe(rest, ctx.sampleRate, who === 'solo' ? undefined : who);
+      });
     }
     try { processor && processor.disconnect(); } catch { /* bereits getrennt */ }
-    stream && stream.getTracks().forEach(t => t.stop());
+    stopStreams(streams);
     ctx && ctx.close();
-    stream = ctx = processor = segmenter = null;
+    streams = []; ctx = processor = segmenters = null;
     setRecordingUI(false);
   }
 
@@ -653,6 +751,8 @@
       if (f) { renderFolder(f); showProblem(''); toast('Notizordner gespeichert'); }
     });
     desktop.info().then(info => {
+      desktopInfo = info;
+      renderMeetingBox();
       if (!activeModel) ui.engine.textContent = 'Desktop · Whisper';
       ui.shortcutHint.textContent = info.shortcut
         ? `Tastenkürzel ${info.shortcut} startet und stoppt die Aufnahme, auch bei geschlossenem Fenster.`
@@ -661,6 +761,26 @@
     desktop.onToggleRecording(() => (recording ? stopRecording() : startRecording()));
     desktop.onSaveNote(async opts => desktop.noteSaved(await saveNote(opts)));
   }
+
+  // ---------- Meeting-Modus (nur Desktop-App) ----------
+
+  function renderMeetingBox() {
+    if (!desktop || !desktopInfo) return;
+    const support = desktopInfo.systemAudio || { ok: false };
+    ui.meetingBox.hidden = false;
+    ui.meeting.disabled = !support.ok || recording;
+    if (!support.ok) ui.meeting.checked = false;
+    ui.meetingUnavailable.hidden = support.ok;
+    ui.meetingUnavailable.textContent = support.ok ? '' : support.reason || 'Der Meeting-Modus ist auf diesem System nicht verfügbar.';
+    ui.meetingDetails.hidden = !ui.meeting.checked;
+  }
+
+  ui.meeting.addEventListener('change', () => {
+    if (!ui.meeting.checked) ui.consent.checked = false;   // nächstes Meeting neu bestätigen
+    showProblem('');
+    renderMeetingBox();
+  });
+  ui.consent.addEventListener('change', () => { if (ui.consent.checked) showProblem(''); });
 
   // ---------- Start ----------
 
