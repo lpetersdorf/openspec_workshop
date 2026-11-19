@@ -23,12 +23,18 @@
     <div class="model">
       <div class="model-row">
         <span id="modelStatus">Modell wird vorbereitet …</span>
-        <label class="model-pick">Modell
-          <select id="modelSelect" disabled><option>wird geprüft …</option></select>
-        </label>
+        <div class="model-picks">
+          <label class="model-pick">Modell
+            <select id="modelSelect" disabled><option>wird geprüft …</option></select>
+          </label>
+          <label class="model-pick">Sprache
+            <select id="langSelect"></select>
+          </label>
+        </div>
       </div>
       <div class="bar" aria-hidden="true"><div id="modelBar"></div></div>
       <span class="model-hint" id="modelHint" hidden></span>
+      <span class="model-hint" id="langHint" hidden></span>
     </div>
     <p class="notice warn" id="problem" hidden></p>
     <div class="folder" id="folderRow" hidden>
@@ -47,6 +53,7 @@
         <span class="timer" id="timer">0:00</span>
       </div>
     </section>
+    <p class="notice warn" id="backlogHint" role="status" hidden></p>
 
     <div class="meeting" id="meetingBox" hidden>
       <label class="switch"><input type="checkbox" id="meeting"> Meeting-Modus: Mikrofon und Systemton (z. B. Teams)</label>
@@ -65,6 +72,12 @@
       </label>
     </div>
 
+    <div class="notice draft" id="draftBar" role="alert" hidden>
+      <span id="draftInfo"></span>
+      <button type="button" id="draftRestore">Wiederherstellen</button>
+      <button type="button" class="ghost" id="draftDiscard">Verwerfen</button>
+    </div>
+
     <label class="label" for="text">Text</label>
     <textarea id="text" rows="10" placeholder="Auf „Aufnahme“ klicken und lossprechen …"></textarea>
     <div class="interim" id="interim" aria-live="polite"></div>
@@ -73,7 +86,7 @@
       <button type="button" id="copyBtn" disabled>Kopieren</button>
       <button type="button" id="noteBtn" disabled>Notiz speichern</button>
       <button type="button" id="claudeBtn" disabled>An Claude übergeben</button>
-      <button type="button" class="ghost" id="clearBtn">Leeren</button>
+      <button type="button" id="clearBtn" disabled>Neue Notiz</button>
       <span class="toast" id="toast" role="status"></span>
     </div>
 

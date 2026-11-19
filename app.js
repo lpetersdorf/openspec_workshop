@@ -31,6 +31,13 @@
     return `${Math.floor(s / 60)}:${pad(s % 60)}`;
   }
 
+  /** Zeitmarke im Meeting-Protokoll: „12:34“, ab einer Stunde „1:02:15“. */
+  function formatTimestamp(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
+  }
+
   function noteFilename(date, { meeting = false } = {}) {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}${pad(date.getMinutes())} ${meeting ? 'Meeting' : 'Diktat'}.md`;
   }
@@ -72,13 +79,15 @@
 
   /**
    * Hängt einen Abschnitt eines Sprechers an: gleicher Sprecher → an seinen Absatz,
-   * neuer Sprecher → neuer Absatz mit Kennzeichnung. Liefert Text und letzten Sprecher.
+   * neuer Sprecher → neuer Absatz mit Kennzeichnung, mit atMs (Aufnahmezeit) davor als „[12:34]“.
+   * Liefert Text und letzten Sprecher.
    */
-  function appendTurn(existing, speaker, addition, lastSpeaker) {
+  function appendTurn(existing, speaker, addition, lastSpeaker, atMs) {
     const add = addition.trim();
     if (!add) return { text: existing, last: lastSpeaker };
     if (speaker === lastSpeaker && existing.trim()) return { text: appendText(existing, add), last: speaker };
-    const turn = `**${SPEAKERS[speaker]}:** ${add}`;
+    const stamp = typeof atMs === 'number' ? `[${formatTimestamp(atMs)}] ` : '';
+    const turn = `**${stamp}${SPEAKERS[speaker]}:** ${add}`;
     return { text: existing.trim() ? `${existing.replace(/\s+$/, '')}\n\n${turn}` : turn, last: speaker };
   }
 
@@ -169,6 +178,13 @@
     turbo: { label: 'Sehr genau', name: 'Whisper large-v3-turbo', id: 'onnx-community/whisper-large-v3-turbo', mb: { gpuF16: 1620, gpu: 760, cpu: null }, gpuOnly: true, noTranslate: true }
   };
   const DEFAULT_MODEL = 'base';
+
+  /** Nächstschnellere Stufe (turbo → small → base → tiny), null bei „Schnell“. */
+  function fasterModel(key) {
+    const keys = Object.keys(MODELS);
+    const i = keys.indexOf(key);
+    return i > 0 ? keys[i - 1] : null;
+  }
   const DTYPE_SUFFIX = { fp32: '', fp16: '_fp16', q4: '_q4', q8: '_quantized' };
 
   /** Gerät und Datentypen für ein Modell auf diesem Rechner. null = hier nicht nutzbar. */
@@ -201,11 +217,26 @@
     return mb >= 1000 ? `${(mb / 1000).toFixed(1).replace('.', ',')} GB` : `${mb} MB`;
   }
 
+  // Gesprochene Sprache. Die Oberfläche bleibt deutsch; 'auto' erkennt je Abschnitt (siehe whisper-worker.js).
+  const LANGUAGES = {
+    german: 'Deutsch', english: 'Englisch', french: 'Französisch', spanish: 'Spanisch', italian: 'Italienisch',
+    auto: 'Automatisch erkennen'
+  };
+  const DEFAULT_LANGUAGE = 'german';
+  const LANGUAGE_KEY = 'bfn-sprache';
+
+  /** Gespeicherte Sprache, bei fehlendem oder unbekanntem Wert Deutsch. */
+  function savedLanguage(storage) {
+    let v = null;
+    try { v = (storage || localStorage).getItem(LANGUAGE_KEY); } catch { /* privat-Modus */ }
+    return Object.prototype.hasOwnProperty.call(LANGUAGES, v) ? v : DEFAULT_LANGUAGE;
+  }
+
   // Für Tests im Browser verfügbar machen
   window.BFN = {
-    applyGlossary, formatDuration, noteFilename, buildNote, buildClaudePrompt, appendText, countWords, appendTurn,
+    applyGlossary, formatDuration, formatTimestamp, fasterModel, noteFilename, buildNote, buildClaudePrompt, appendText, countWords, appendTurn,
     rms, downsample, Segmenter, isHallucination, DEFAULT_GLOSSARY,
-    MODELS, modelDtype, modelFiles, modelSize, sizeLabel
+    MODELS, modelDtype, modelFiles, modelSize, sizeLabel, LANGUAGES, savedLanguage
   };
 
   // ---------- Glossar-Speicher ----------
@@ -227,13 +258,15 @@
   const $ = id => document.getElementById(id);
   const ui = {
     rec: $('recBtn'), recLabel: $('recLabel'), status: $('statusText'), timer: $('timer'),
-    text: $('text'), interim: $('interim'), problem: $('problem'),
+    text: $('text'), interim: $('interim'), problem: $('problem'), backlog: $('backlogHint'),
+    draft: $('draftBar'), draftInfo: $('draftInfo'), draftRestore: $('draftRestore'), draftDiscard: $('draftDiscard'),
     model: $('modelStatus'), modelBar: $('modelBar'), engine: $('engine'),
     file: $('fileInput'), translate: $('translate'),
     copy: $('copyBtn'), note: $('noteBtn'), claude: $('claudeBtn'), clear: $('clearBtn'), toast: $('toast'),
     gList: $('glossaryList'), gCount: $('glossaryCount'), gForm: $('glossaryForm'), gFrom: $('gFrom'), gTo: $('gTo'),
     folderRow: $('folderRow'), folderPath: $('folderPath'), folderBtn: $('folderBtn'), shortcutHint: $('shortcutHint'),
     modelSelect: $('modelSelect'), modelHint: $('modelHint'), translateHint: $('translateHint'),
+    langSelect: $('langSelect'), langHint: $('langHint'),
     meetingBox: $('meetingBox'), meeting: $('meeting'), meetingDetails: $('meetingDetails'), consent: $('consent'), meetingUnavailable: $('meetingUnavailable')
   };
 
@@ -264,10 +297,10 @@
   let glossary = loadGlossary();
   let toastTimer = null;
 
-  function toast(msg) {
+  function toast(msg, ms = 2500) {
     ui.toast.textContent = msg;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { ui.toast.textContent = ''; }, 2500);
+    toastTimer = setTimeout(() => { ui.toast.textContent = ''; }, ms);
   }
 
   function showProblem(msg) {
@@ -280,7 +313,91 @@
     ui.copy.disabled = empty;
     ui.note.disabled = empty;
     ui.claude.disabled = empty;
+    renderNewNote();
     pushState();
+    scheduleDraft();
+  }
+
+  /** „Neue Notiz“: gesperrt während Aufnahme/Transkription und wenn nichts zurückzusetzen ist. */
+  function renderNewNote() {
+    const nothing = !ui.text.value.trim() && totalMs() === 0;
+    ui.clear.disabled = recording || pending > 0 || nothing;
+  }
+
+  // ---------- Entwurf (nur Desktop-App) ----------
+  // Ungespeicherter Text wird spätestens DRAFT_MS nach einer Änderung in den App-Daten gesichert
+  // und nach einem Absturz beim nächsten Start angeboten. Nach Speichern oder „Neue Notiz“ wird er gelöscht.
+
+  const DRAFT_MS = 30000;
+  let draftTimer = null;
+  let draftWarned = false;     // Hinweis bei Schreibfehler nur einmal
+  let draftOffer = null;       // Entwurf vom letzten Start, noch nicht beantwortet
+
+  function scheduleDraft() {
+    if (!desktop || draftTimer) return;
+    draftTimer = setTimeout(writeDraft, DRAFT_MS);
+  }
+
+  async function writeDraft() {
+    clearTimeout(draftTimer); draftTimer = null;
+    if (!desktop || draftOffer) return;   // alten Entwurf nicht überschreiben, bevor die Person entschieden hat
+    const text = ui.text.value.trim();
+    if (!text || text === savedText) { desktop.clearDraft(); return; }
+    let res;
+    try {
+      res = await desktop.saveDraft({ text: ui.text.value, meeting: meetingContent, lastSpeaker, recordedMs: totalMs() });
+    } catch (err) { res = { ok: false, message: String((err && err.message) || err) }; }
+    if (!res.ok && !draftWarned) {
+      draftWarned = true;
+      showProblem(`Der Entwurf konnte nicht gesichert werden (${res.message}). Die Aufnahme läuft weiter, den Text bitte zwischendurch als Notiz speichern.`);
+    }
+  }
+
+  function dropDraft() {
+    clearTimeout(draftTimer); draftTimer = null;
+    if (desktop && !draftOffer) desktop.clearDraft();
+  }
+
+  function offerDraft(draft) {
+    draftOffer = draft;
+    const d = new Date(draft.savedAt);
+    const when = isNaN(d) ? '' : ` vom ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())} Uhr`;
+    const kind = draft.meeting ? 'Meeting-Entwurf' : 'Entwurf';
+    ui.draftInfo.textContent = `Ungespeicherter ${kind}${when} · ${countWords(draft.text) === 1 ? '1 Wort' : `${countWords(draft.text)} Wörter`},${formatDuration(draft.recordedMs || 0)} Aufnahme.`;
+    ui.draft.hidden = false;
+  }
+
+  function closeDraftOffer() {
+    draftOffer = null;
+    ui.draft.hidden = true;
+  }
+
+  if (desktop) {
+    ui.draftRestore.addEventListener('click', () => {
+      const d = draftOffer;
+      if (!d) return;
+      closeDraftOffer();
+      if (ui.text.value.trim()) {
+        // Inzwischen neuer Text: Entwurf davor setzen, nichts überschreiben
+        ui.text.value = `${d.text.trim()}\n\n${ui.text.value.trim()}`;
+        meetingContent = meetingContent || !!d.meeting;
+      } else {
+        ui.text.value = d.text;
+        meetingContent = !!d.meeting;
+        lastSpeaker = d.lastSpeaker || null;
+        recordedMs = Number(d.recordedMs) || 0;
+        renderTimer();
+      }
+      toast('Entwurf wiederhergestellt');
+      updateButtons();
+      writeDraft();
+    });
+    ui.draftDiscard.addEventListener('click', () => {
+      closeDraftOffer();
+      desktop.clearDraft();
+      updateButtons();
+    });
+    desktop.loadDraft().then(d => { if (d) offerDraft(d); });
   }
 
   function renderGlossary() {
@@ -331,17 +448,29 @@
     a.download = filename;
     document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    toast('Notiz gespeichert');
   }
 
-  function markSaved() { savedText = ui.text.value.trim(); pushState(); }
+  function markSaved() { savedText = ui.text.value.trim(); dropDraft(); pushState(); }
 
   function clearText() {
     ui.text.value = ''; recordedMs = 0; sessionStartWords = 0;
     lastSpeaker = null; meetingContent = false;
     ui.consent.checked = false;   // nächstes Meeting neu bestätigen
-    renderTimer(); updateButtons();
+    renderTimer(); updateButtons(); dropDraft();
   }
+
+  const NEW_NOTE_CONFIRM = 'Der Text ist noch nicht als Notiz gespeichert. Trotzdem verwerfen und neu beginnen?';
+
+  /** Knopf „Neue Notiz“: setzt alles zurück, fragt bei ungespeichertem Text vorher nach. */
+  function newNote() {
+    if (recording || pending > 0) return;
+    const text = ui.text.value.trim();
+    if (text && text !== savedText && !window.confirm(NEW_NOTE_CONFIRM)) return;
+    clearText();
+    toast('Neue Notiz · Zeit steht auf 0:00');
+  }
+
+  const SAVED_HINT = '„Neue Notiz“ setzt Text und Zeit für die nächste Aufnahme zurück';
 
   /**
    * Speichert die Notiz: in der Desktop-App in den Notizordner, sonst als Download.
@@ -355,8 +484,9 @@
     if (desktop && folder) {
       const res = await desktop.saveNote(filename, content);
       if (res.ok) {
-        showProblem(''); toast(`Gespeichert: ${res.name}`);
-        if (fromOverlay) clearText(); else markSaved();
+        showProblem('');
+        if (fromOverlay) { toast(`Gespeichert: ${res.name}`); clearText(); }
+        else { toast(`Gespeichert: ${res.name} · ${SAVED_HINT}`, 6000); markSaved(); }
         return res;
       }
       if (res.reason === 'missing') {
@@ -370,12 +500,13 @@
       return { ok: false, reason: 'no-folder' };
     }
     downloadNote(filename, content);
+    toast(`Notiz gespeichert · ${SAVED_HINT}`, 6000);
     markSaved();
     return { ok: true, name: filename };
   }
 
   ui.note.addEventListener('click', () => saveNote());
-  ui.clear.addEventListener('click', clearText);
+  ui.clear.addEventListener('click', newNote);
   ui.text.addEventListener('input', updateButtons);
 
   // ---------- Whisper im Worker ----------
@@ -386,11 +517,27 @@
   let nextId = 1;
   let pending = 0;
 
+  // Rückstau: ab BACKLOG_HINT wartenden Abschnitten Hinweis zeigen, erst bei 0 wieder ausblenden
+  const BACKLOG_HINT = 10;
+  let backlogShown = false;
+
+  function renderBacklog() {
+    if (recording && pending >= BACKLOG_HINT) backlogShown = true;
+    else if (pending === 0) backlogShown = false;
+    ui.backlog.hidden = !backlogShown;
+    if (!backlogShown) { ui.backlog.textContent = ''; return; }
+    const faster = fasterModel(activeModel);
+    ui.backlog.textContent = `Die Transkription hängt hinterher (${pending} Abschnitte warten). Der Text erscheint verzögert, es geht nichts verloren.`
+      + (faster ? ` Für die nächste Aufnahme besser die schnellere Stufe „${MODELS[faster].label}“ wählen.` : '');
+  }
+
   function renderStatus() {
+    renderBacklog();
     if (recording) ui.status.textContent = pending ? `Hört zu … · ${pending} in Arbeit` : 'Hört zu …';
     else ui.status.textContent = pending ? `Transkribiert (${pending}) …` : 'Bereit';
     ui.interim.textContent = pending ? (modelReady ? 'Text wird verarbeitet …' : 'Wartet auf das Modell …') : '';
     lockModelSelect();
+    renderNewNote();
     pushState();
   }
 
@@ -473,6 +620,34 @@
     requestModel(key);
   });
 
+  // ---------- Sprache ----------
+  // Gilt ab dem nächsten Abschnitt, deshalb auch während der Aufnahme wählbar (siehe design.md).
+
+  let language = savedLanguage();
+
+  function renderLanguage() {
+    if (!ui.langSelect.options.length) {
+      Object.entries(LANGUAGES).forEach(([key, label]) => {
+        const opt = document.createElement('option');
+        opt.value = key; opt.textContent = label;
+        ui.langSelect.append(opt);
+      });
+    }
+    ui.langSelect.value = language;
+    const auto = language === 'auto';
+    ui.langHint.hidden = !auto;
+    ui.langHint.textContent = auto
+      ? 'Die Sprache wird je Abschnitt erkannt (Deutsch, Englisch, Französisch, Spanisch, Italienisch). Bei sehr kurzen Abschnitten kann sie danebenliegen, und die Transkription braucht etwas länger. Steht die Sprache fest, ist die feste Wahl zuverlässiger.'
+      : '';
+  }
+
+  ui.langSelect.addEventListener('change', () => {
+    language = Object.prototype.hasOwnProperty.call(LANGUAGES, ui.langSelect.value) ? ui.langSelect.value : DEFAULT_LANGUAGE;
+    try { localStorage.setItem(LANGUAGE_KEY, language); } catch { /* privat-Modus: nur für diese Sitzung */ }
+    renderLanguage();
+  });
+  renderLanguage();
+
   function modelLabel(key) {
     const m = MODELS[key];
     return m ? `„${m.label}“ (${m.name})` : 'Modell';
@@ -536,12 +711,12 @@
       }
       case 'result': {
         pending = Math.max(0, pending - 1);
-        const speaker = speakers.get(data.id);
+        const job = speakers.get(data.id);
         speakers.delete(data.id);
         if (!isHallucination(data.text)) {
           const clean = applyGlossary(data.text, glossary);
-          if (speaker) {
-            const turn = appendTurn(ui.text.value, speaker, clean, lastSpeaker);
+          if (job) {
+            const turn = appendTurn(ui.text.value, job.speaker, clean, lastSpeaker, job.atMs);
             ui.text.value = turn.text; lastSpeaker = turn.last; meetingContent = true;
           } else {
             ui.text.value = appendText(ui.text.value, clean); lastSpeaker = null;
@@ -562,16 +737,18 @@
     }
   });
 
-  const speakers = new Map();   // Auftrag → Sprecher (Meeting-Modus)
+  const speakers = new Map();   // Auftrag → { speaker, atMs } (Meeting-Modus)
 
   /** Schickt Audio (beliebige Rate) als 16-kHz-Mono an den Worker. */
   function transcribe(samples, sampleRate, speaker) {
+    // Beginn des Abschnitts in der Aufnahmezeit, für die Zeitmarke beim Sprecherwechsel
+    const atMs = Math.max(0, totalMs() - samples.length / sampleRate * 1000);
     const audio = downsample(samples, sampleRate, 16000);
     const id = nextId++;
-    if (speaker) speakers.set(id, speaker);
+    if (speaker) speakers.set(id, { speaker, atMs });
     pending++;
     renderStatus();
-    worker.postMessage({ type: 'transcribe', id, audio, translate: ui.translate.checked }, [audio.buffer]);
+    worker.postMessage({ type: 'transcribe', id, audio, language, translate: ui.translate.checked }, [audio.buffer]);
   }
 
   // ---------- Aufnahme ----------
@@ -599,7 +776,7 @@
 
   function systemAudioHint() {
     return desktopInfo && desktopInfo.platform === 'darwin'
-      ? 'Der Systemton konnte nicht aufgenommen werden. Bitte unter Systemeinstellungen › Datenschutz & Sicherheit › „Bildschirm- & Systemaudioaufnahme“ Blueforte Notes erlauben und die App neu starten.'
+      ? 'Der Systemton konnte nicht aufgenommen werden. Bitte unter Systemeinstellungen › Datenschutz & Sicherheit › „Bildschirm- & Systemaudioaufnahme“ Blueforte Notes erlauben. Danach die App über das Symbol in der Menüleiste › „Beenden“ schließen und aus dem Programme-Ordner neu starten. Das Schließen des Fensters reicht nicht, die App läuft sonst im Hintergrund weiter.'
       : 'Der Systemton konnte nicht aufgenommen werden. Bitte prüfen, ob ein Lautsprecher oder Headset als Wiedergabegerät aktiv ist, und die App neu starten.';
   }
 
@@ -703,6 +880,7 @@
     ctx && ctx.close();
     streams = []; ctx = processor = segmenters = null;
     setRecordingUI(false);
+    writeDraft();   // Stand beim Stoppen sofort sichern
   }
 
   ui.rec.addEventListener('click', () => (recording ? stopRecording() : startRecording()));

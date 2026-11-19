@@ -10,6 +10,7 @@
     whoMe: $('whoMe'), themRow: $('themRow'), stop: $('stop'), save: $('save'), open: $('open')
   };
 
+  const BACKLOG_HINT = 10;   // wie in app.js: ab hier hängt die Transkription hinterher
   let current = { recording: false, pending: 0, elapsedMs: 0, words: 0, message: '' };
   let receivedAt = Date.now();
   let tick = null;
@@ -31,7 +32,8 @@
     ui.whoMe.hidden = !meeting;
     ui.themRow.hidden = !meeting;
     if (s.recording) {
-      ui.status.textContent = s.pending ? `Hört zu … · ${s.pending} in Arbeit` : 'Hört zu …';
+      ui.status.textContent = s.pending >= BACKLOG_HINT ? `Text verzögert · ${s.pending} in Arbeit`
+        : s.pending ? `Hört zu … · ${s.pending} in Arbeit` : 'Hört zu …';
     } else if (s.pending) {
       ui.status.textContent = 'Transkribiert …';
     } else if (s.message) {

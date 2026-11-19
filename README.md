@@ -68,6 +68,13 @@ Blueforte Notes als echte App für macOS und Windows (Electron). Neu gegenüber 
   - **Windows:** funktioniert ohne weitere Einstellungen.
   - **macOS 14.2 oder neuer:** Beim ersten Meeting fragt macOS nach der Freigabe für „Bildschirm- & Systemaudioaufnahme“. Zuverlässig nur in der gebauten App (`npm run dist:mac`); beim Start aus dem Terminal hängt der Systemton an den Rechten des Terminals.
 
+- **Lange Meetings (develop):** Für Aufnahmen von einer Stunde und mehr.
+  - **Entwurf:** Ungespeicherter Text wird spätestens 30 Sekunden nach jeder Änderung gesichert (in den App-Daten, nicht im Notizordner). Nach einem Absturz bietet die App ihn beim nächsten Start an: „Wiederherstellen“ oder „Verwerfen“. Nach dem Speichern der Notiz oder „Neue Notiz“ wird der Entwurf gelöscht.
+  - **Wach bleiben:** Während Aufnahme und Transkription geht der Rechner nicht in den Ruhezustand, der Bildschirm darf ausgehen. Ein zugeklapptes MacBook ohne externen Bildschirm schläft trotzdem ein, also Deckel offen lassen.
+  - **Rückstau:** Warten 10 oder mehr Abschnitte auf die Transkription, erscheint ein Hinweis. Es geht nichts verloren, der Text kommt nur später. Für das nächste Meeting dann die empfohlene schnellere Stufe wählen. Auf einem Mac mit Apple-Chip ist „Genau“ ein guter Startpunkt.
+  - **Zeitmarken:** Jeder Sprecherwechsel beginnt mit der Aufnahmezeit, z. B. `**[12:34] Gegenüber:**`, ab einer Stunde `**[1:02:15] Ich:**`.
+  - **Neue Notiz:** „Notiz speichern“ im Hauptfenster lässt Text und Zeit stehen. Vor dem nächsten Meeting auf **„Neue Notiz“** klicken: Text, Zeit, Zeitmarken, Einverständnis und Entwurf werden zurückgesetzt. Bei ungespeichertem Text fragt die App vorher nach, während einer Aufnahme ist der Knopf gesperrt.
+
 ### Selbst bauen
 
 ```bash
@@ -115,4 +122,5 @@ Die App ist nicht mit einem Apple- oder Microsoft-Zertifikat signiert.
   | Sehr genau | Whisper large-v3-turbo | ca. 0,8–1,6 GB | nicht verfügbar |
 
   Auf schwachen Rechnern ohne Grafikkarte ist „Schnell“ die beste Wahl. „Sehr genau“ übersetzt nicht.
+- **Sprache wählen:** Neben dem Modell lässt sich die gesprochene Sprache wählen: Deutsch (Standard), Englisch, Französisch, Spanisch, Italienisch oder „Automatisch erkennen“. Die Wahl gilt für Diktat, Meeting-Modus und Audiodateien und bleibt gespeichert. Ein Wechsel während der Aufnahme gilt ab dem nächsten Abschnitt. „Automatisch erkennen“ prüft jeden Abschnitt einzeln, braucht etwas mehr Rechenzeit und kann bei sehr kurzen Abschnitten danebenliegen. Für lange Meetings in einer bekannten Sprache besser die feste Wahl nehmen. „Ins Englische übersetzen“ funktioniert aus jeder dieser Sprachen.
 - **Offline-Demo:** Seite öffnen, warten bis „Modell bereit“, dann WLAN aus und diktieren. Die Seite dabei nicht neu laden, denn die Bibliothek transformers.js kommt per CDN.

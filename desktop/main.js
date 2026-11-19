@@ -1,7 +1,7 @@
 // Blueforte Notes – Desktop-App (Electron)
 const {
   app, BrowserWindow, protocol, ipcMain, dialog, globalShortcut, session, systemPreferences, shell,
-  Tray, Menu, nativeImage, screen, Notification, desktopCapturer
+  Tray, Menu, nativeImage, screen, Notification, desktopCapturer, powerSaveBlocker
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -37,6 +37,32 @@ function writeSettings(settings) {
   fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 2));
 }
 function updateSettings(patch) { writeSettings({ ...readSettings(), ...patch }); }
+
+// ---------- Entwurf (ungespeicherter Text, für die Wiederherstellung nach einem Absturz) ----------
+const draftFile = () => path.join(app.getPath('userData'), 'draft.json');
+function saveDraft(draft) {
+  const file = draftFile();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  // Erst in eine temporäre Datei, dann ersetzen: Ein Absturz beim Schreiben lässt die alte Fassung heil
+  fs.writeFileSync(`${file}.tmp`, JSON.stringify({ ...draft, savedAt: new Date().toISOString() }));
+  fs.renameSync(`${file}.tmp`, file);
+}
+function loadDraft() {
+  try {
+    const draft = JSON.parse(fs.readFileSync(draftFile(), 'utf8'));
+    return draft && typeof draft.text === 'string' && draft.text.trim() ? draft : null;
+  } catch { return null; }
+}
+function clearDraft() {
+  for (const f of [draftFile(), `${draftFile()}.tmp`]) { try { fs.unlinkSync(f); } catch { /* nicht vorhanden */ } }
+}
+
+// ---------- Wach bleiben während Aufnahme und Transkription ----------
+let sleepBlocker = null;
+function updateSleepBlocker(busy) {
+  if (busy && sleepBlocker === null) sleepBlocker = powerSaveBlocker.start('prevent-app-suspension');
+  if (!busy && sleepBlocker !== null) { powerSaveBlocker.stop(sleepBlocker); sleepBlocker = null; }
+}
 
 /** Liefert einen freien Dateinamen: "Name.md", "Name 2.md", "Name 3.md" … */
 function uniquePath(dir, filename) {
@@ -234,6 +260,7 @@ function onStateFromUI(next) {
   const wasBusy = state.recording || state.pending > 0;
   state = { ...state, ...next };
   if (state.recording !== wasRecording) updateTray();
+  updateSleepBlocker(state.recording || state.pending > 0);
 
   // Aufnahme startet ohne aktives Hauptfenster → Aufnahme-Fenster zeigen
   if (state.recording && !wasRecording) {
@@ -264,7 +291,7 @@ async function confirmQuit() {
     defaultId: 1,
     cancelId: 1,
     message: 'Blueforte Notes beenden?',
-    detail: `${what} Beim Beenden geht der Text verloren.`
+    detail: `${what} Der Text bleibt als Entwurf erhalten und wird beim nächsten Start angeboten.`
   });
   if (response === 0) { quitting = true; app.quit(); }
 }
@@ -341,6 +368,12 @@ if (!app.requestSingleInstanceLock()) {
       return { ok: true, path: target, name: path.basename(target) };
     });
 
+    ipcMain.handle('draft:save', (_e, draft) => {
+      try { saveDraft(draft || {}); return { ok: true }; } catch (err) { return { ok: false, message: String((err && err.message) || err) }; }
+    });
+    ipcMain.handle('draft:load', () => loadDraft());
+    ipcMain.handle('draft:clear', () => { clearDraft(); return true; });
+
     ipcMain.handle('mic:ensure', async () => {
       if (process.platform !== 'darwin') return true;
       if (systemPreferences.getMediaAccessStatus('microphone') === 'granted') return true;
@@ -381,6 +414,7 @@ if (!app.requestSingleInstanceLock()) {
         state: () => state,
         trayMenu: () => (tray ? trayMenuTemplate().filter(i => i.label).map(i => i.label) : null),
         overlayVisible: () => !!(overlay && overlay.isVisible()),
+        sleepBlocked: () => sleepBlocker !== null && powerSaveBlocker.isStarted(sleepBlocker),
         mainVisible: () => !!(win && win.isVisible()),
         toggleRecording,
         showMain

@@ -14,5 +14,9 @@ contextBridge.exposeInMainWorld('bfnDesktop', {
   onSaveNote: callback => ipcRenderer.on('save-note', (_e, opts) => callback(opts || {})),
   noteSaved: result => ipcRenderer.send('ui:saved', result),
   // Meeting-Modus: Hauptfenster öffnen, z. B. wenn das Einverständnis fehlt
-  showWindow: () => ipcRenderer.send('win:show')
+  showWindow: () => ipcRenderer.send('win:show'),
+  // Entwurf: ungespeicherter Text überlebt einen Absturz
+  saveDraft: draft => ipcRenderer.invoke('draft:save', draft),
+  loadDraft: () => ipcRenderer.invoke('draft:load'),
+  clearDraft: () => ipcRenderer.invoke('draft:clear')
 });
